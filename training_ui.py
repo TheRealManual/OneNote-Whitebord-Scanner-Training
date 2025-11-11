@@ -324,7 +324,9 @@ def run_training(epochs, batch_size, lr):
             '--output-dir', str(MODELS_DIR),
             '--epochs', str(epochs),
             '--batch-size', str(batch_size),
-            '--lr', str(lr)
+            '--lr', str(lr),
+            '--img-height', '768',
+            '--img-width', '1024'
         ]
         
         process = subprocess.Popen(
@@ -383,7 +385,7 @@ def run_training(epochs, batch_size, lr):
                 'final_train_loss': training_state['train_loss'],
                 'final_val_loss': training_state['val_loss'],
                 'final_pixel_acc': training_state['pixel_acc'],
-                'model_file': 'whiteboard_seg_int8.onnx'
+                'model_file': 'whiteboard_seg.pts'
             }
             save_training_history(history_entry)
         else:
