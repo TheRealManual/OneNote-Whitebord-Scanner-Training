@@ -1,34 +1,102 @@
 """
 Training Script for Whiteboard Segmentation Model
-DeepLabV3-MobileNetV3 Large for stroke/smudge/shadow classification
-Target: 3-5 MB INT8 quantized ONNX model
+DeepLabV3-MobileNetV3 Large for binary stroke segmentation
+
+PRODUCTION SETTINGS (aligned with scanner):
+- Resolution: 768×1024 (H×W) - matches scanner tile size
+- Classes: 2 (background=0, stroke=1)
+- Loss: Combined Dice (60%) + Focal (40%)
+- Augmentation: Rotation, brightness, contrast, blur, sharpening
+- Normalization: ImageNet (mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
+Scanner uses these same settings for inference with 50% overlapping tiles.
+
+Usage:
+    python train_segmentation.py --epochs 100 --batch-size 1 --lr 0.0001
 """
 
 import torch
+import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageEnhance
 import numpy as np
 import os
 from pathlib import Path
 import argparse
+import json
+
+
+class DiceLoss(nn.Module):
+    """Dice Loss for binary segmentation - better than CrossEntropy for imbalanced data"""
+    def __init__(self, smooth=1.0):
+        super(DiceLoss, self).__init__()
+        self.smooth = smooth
+    
+    def forward(self, predictions, targets):
+        # Apply softmax to get probabilities
+        predictions = F.softmax(predictions, dim=1)
+        
+        # Get probability for stroke class (class 1)
+        pred_stroke = predictions[:, 1, :, :]
+        
+        # Flatten
+        pred_flat = pred_stroke.contiguous().view(-1)
+        target_flat = targets.contiguous().view(-1).float()
+        
+        # Dice coefficient
+        intersection = (pred_flat * target_flat).sum()
+        dice = (2.0 * intersection + self.smooth) / (pred_flat.sum() + target_flat.sum() + self.smooth)
+        
+        return 1.0 - dice
+
+
+class FocalLoss(nn.Module):
+    """Focal Loss - focuses on hard examples, better for imbalanced classes"""
+    def __init__(self, alpha=0.25, gamma=2.0):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+    
+    def forward(self, predictions, targets):
+        ce_loss = F.cross_entropy(predictions, targets, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = self.alpha * (1 - pt) ** self.gamma * ce_loss
+        return focal_loss.mean()
+
+
+class CombinedLoss(nn.Module):
+    """Combination of Dice Loss and Focal Loss for best results"""
+    def __init__(self, dice_weight=0.6, focal_weight=0.4):
+        super(CombinedLoss, self).__init__()
+        self.dice = DiceLoss()
+        self.focal = FocalLoss(alpha=0.25, gamma=2.0)
+        self.dice_weight = dice_weight
+        self.focal_weight = focal_weight
+    
+    def forward(self, predictions, targets):
+        return self.dice_weight * self.dice(predictions, targets) + \
+               self.focal_weight * self.focal(predictions, targets)
 
 
 class WhiteboardDataset(Dataset):
     """Dataset for whiteboard images with segmentation masks"""
     
-    def __init__(self, root_dir, train=True, augment=True):
+    def __init__(self, root_dir, train=True, augment=True, img_size=(768, 1024)):
         """
         Args:
             root_dir: Path to dataset with images/ and masks/ folders
             train: If True, use training split
             augment: If True, apply data augmentation
+            img_size: (height, width) for training - higher = better quality
         """
         self.root_dir = Path(root_dir)
         self.img_dir = self.root_dir / "images"
         self.mask_dir = self.root_dir / "masks"
+        self.img_size = img_size
         
         # Get all image files
         self.files = sorted([f.name for f in self.img_dir.glob("*.jpg")] + 
@@ -37,13 +105,9 @@ class WhiteboardDataset(Dataset):
         if len(self.files) == 0:
             raise ValueError(f"No images found in {self.img_dir}")
         
-        # Train/val split (80/20), but ensure at least 1 in each if only 1 image total
+        # Train/val split (80/20)
         if len(self.files) == 1:
-            # Single image - use for both train and val (just for testing)
-            if train:
-                self.files = self.files[:1]
-            else:
-                self.files = self.files[:1]
+            self.files = self.files[:1]
         else:
             split_idx = max(1, int(len(self.files) * 0.8))
             if train:
@@ -51,21 +115,21 @@ class WhiteboardDataset(Dataset):
             else:
                 self.files = self.files[split_idx:]
         
-        print(f"{'Train' if train else 'Val'} dataset: {len(self.files)} images")
+        print(f"{'Train' if train else 'Val'} dataset: {len(self.files)} images at {img_size[1]}x{img_size[0]}")
         
         # Base transforms
         self.img_transform = transforms.Compose([
-            transforms.Resize((480, 640)),
+            transforms.Resize(img_size),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], 
                                std=[0.229, 0.224, 0.225])
         ])
         
-        # Augmentation transforms
+        # Enhanced augmentation
         self.augment = augment and train
         if self.augment:
             self.color_jitter = transforms.ColorJitter(
-                brightness=0.25, contrast=0.2, saturation=0.2, hue=0.1
+                brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1
             )
     
     def __len__(self):
@@ -76,38 +140,54 @@ class WhiteboardDataset(Dataset):
         img_path = self.img_dir / self.files[idx]
         img = Image.open(img_path).convert("RGB")
         
-        # Load mask (ensure single channel/grayscale)
+        # Load mask
         mask_path = self.mask_dir / self.files[idx].replace(".jpg", ".png")
-        mask = Image.open(mask_path).convert("L")  # Convert to grayscale/single channel
+        mask = Image.open(mask_path).convert("L")
         
         # Resize
-        img = img.resize((640, 480))
-        mask = mask.resize((640, 480), Image.NEAREST)
+        img = img.resize((self.img_size[1], self.img_size[0]))
+        mask = mask.resize((self.img_size[1], self.img_size[0]), Image.NEAREST)
         
-        # Apply augmentation
+        # Enhanced augmentation
         if self.augment:
             # Random horizontal flip
             if np.random.rand() > 0.5:
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
                 mask = mask.transpose(Image.FLIP_LEFT_RIGHT)
             
-            # Random color jitter
+            # Random rotation (-10 to +10 degrees)
+            if np.random.rand() > 0.5:
+                angle = np.random.uniform(-10, 10)
+                img = img.rotate(angle, fillcolor=(255, 255, 255))
+                mask = mask.rotate(angle, fillcolor=0)
+            
+            # Color jitter
             img = self.color_jitter(img)
             
-            # Random blur (simulate camera blur)
+            # Random brightness
+            if np.random.rand() > 0.5:
+                enhancer = ImageEnhance.Brightness(img)
+                img = enhancer.enhance(np.random.uniform(0.7, 1.3))
+            
+            # Random contrast
+            if np.random.rand() > 0.5:
+                enhancer = ImageEnhance.Contrast(img)
+                img = enhancer.enhance(np.random.uniform(0.8, 1.2))
+            
+            # Random blur
             if np.random.rand() > 0.7:
                 img = img.filter(ImageFilter.GaussianBlur(radius=np.random.uniform(0.5, 2.0)))
+            
+            # Random sharpening
+            if np.random.rand() > 0.7:
+                img = img.filter(ImageFilter.SHARPEN)
         
         # Convert to tensors
         img_tensor = self.img_transform(img)
         mask_array = np.array(mask)
         
-        # Normalize mask values to class indices (0-3)
-        # Assuming mask uses pixel values: 0=bg, 85=stroke, 170=smudge, 255=shadow
-        # Map to classes: 0=bg, 1=stroke, 2=smudge, 3=shadow
-        mask_array = mask_array // 85  # 0->0, 85->1, 170->2, 255->3
-        mask_array = np.clip(mask_array, 0, 3)  # Ensure within bounds
-        
+        # Binary: 0=background, 1=stroke
+        mask_array = (mask_array > 127).astype(np.uint8)
         mask_tensor = torch.from_numpy(mask_array).long()
         
         return img_tensor, mask_tensor
@@ -119,11 +199,12 @@ def train_model(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # Create datasets
-    train_dataset = WhiteboardDataset(args.data_dir, train=True, augment=True)
-    val_dataset = WhiteboardDataset(args.data_dir, train=False, augment=False)
+    # Create datasets with higher resolution
+    img_size = (args.img_height, args.img_width)
+    train_dataset = WhiteboardDataset(args.data_dir, train=True, augment=True, img_size=img_size)
+    val_dataset = WhiteboardDataset(args.data_dir, train=False, augment=False, img_size=img_size)
     
-    # DataLoader with num_workers=0 for Windows compatibility
+    # DataLoader
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
                              shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, 
@@ -133,52 +214,49 @@ def train_model(args):
     print("Loading DeepLabV3-MobileNetV3 Large...")
     model = deeplabv3_mobilenet_v3_large(weights="DEFAULT")
     
-    # Replace classifier head for 4 classes
-    # Classes: 0=background, 1=stroke, 2=smudge, 3=shadow
+    # Replace classifier for binary segmentation
     model.classifier[4] = torch.nn.Conv2d(256, args.num_classes, kernel_size=1)
-    # aux_classifier uses 10 input channels from MobileNetV3 low-level features
-    model.aux_classifier[4] = torch.nn.Conv2d(10, args.num_classes, kernel_size=1)
-    
-    # Disable auxiliary classifier to avoid dimension issues during training
-    # (DeepLabV3 returns aux outputs in training mode which complicates loss calculation)
-    model.aux_classifier = None
+    model.aux_classifier = None  # Disable aux classifier
     
     model = model.to(device)
-    # Detect very small datasets / tiny batch sizes that will trigger BatchNorm errors
-    train_len = len(train_dataset)
-    val_len = len(val_dataset)
-    small_data = (train_len < 2) or (args.batch_size < 2)
+    
+    # Handle small datasets
+    small_data = (len(train_dataset) < 2) or (args.batch_size < 2)
     if small_data:
-        # Running the network in eval mode prevents BatchNorm from using per-batch
-        # statistics (which require batch size > 1). We keep gradients enabled so
-        # optimizer steps still update weight/bias parameters (affine) of BatchNorm
-        # and other layers. This is a safe fallback for tiny datasets used for
-        # quick tests; for real training provide >=2 training images and batch_size>=2.
-        print("WARNING: tiny dataset or batch size detected; switching model to eval()-mode during training to avoid BatchNorm errors")
+        print("WARNING: tiny dataset detected; switching to eval()-mode during training")
         model.eval()
     
-    # Loss and optimizer
-    criterion = torch.nn.CrossEntropyLoss()
+    # Use Combined Loss (Dice + Focal) for best accuracy
+    criterion = CombinedLoss(dice_weight=0.6, focal_weight=0.4)
+    
+    # Optimizer with weight decay
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     
-    # Learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    # Learning rate scheduler with warmup
+    def lr_lambda(epoch):
+        if epoch < args.warmup_epochs:
+            return (epoch + 1) / args.warmup_epochs
+        return 0.5 * (1 + np.cos(np.pi * (epoch - args.warmup_epochs) / (args.epochs - args.warmup_epochs)))
     
-    # Training loop
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    
+    # Training loop with early stopping
     best_val_loss = float('inf')
+    patience_counter = 0
+    history = {'train_loss': [], 'val_loss': [], 'val_iou': [], 'val_f1': []}
     
     for epoch in range(args.epochs):
-        # Train (unless we're in the small-data fallback where model was set to eval())
+        # Train
         if not small_data:
             model.train()
         else:
-            # keep eval() active so BatchNorm uses running stats instead of per-batch stats
             model.eval()
+        
         train_loss = 0
         for batch_idx, (imgs, masks) in enumerate(train_loader):
             imgs, masks = imgs.to(device), masks.to(device)
             
-            # Forward - handle both dict and tensor outputs
+            # Forward
             model_output = model(imgs)
             if isinstance(model_output, dict):
                 outputs = model_output["out"]
@@ -192,9 +270,6 @@ def train_model(args):
             optimizer.step()
             
             train_loss += loss.item()
-            
-            if (batch_idx + 1) % 10 == 0:
-                print(f"Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - Loss: {loss.item():.4f}")
         
         train_loss /= len(train_loader)
         
@@ -203,6 +278,11 @@ def train_model(args):
         val_loss = 0
         correct_pixels = 0
         total_pixels = 0
+        intersection_stroke = 0
+        union_stroke = 0
+        true_positive = 0
+        false_positive = 0
+        false_negative = 0
         
         with torch.no_grad():
             for imgs, masks in val_loader:
@@ -215,42 +295,75 @@ def train_model(args):
                 loss = criterion(outputs, masks)
                 val_loss += loss.item()
                 
-                # Calculate pixel accuracy
+                # Calculate metrics
                 preds = torch.argmax(outputs, dim=1)
                 correct_pixels += (preds == masks).sum().item()
                 total_pixels += masks.numel()
+                
+                # IoU for strokes
+                pred_stroke = (preds == 1)
+                mask_stroke = (masks == 1)
+                intersection_stroke += (pred_stroke & mask_stroke).sum().item()
+                union_stroke += (pred_stroke | mask_stroke).sum().item()
+                
+                # Precision/Recall for strokes
+                true_positive += (pred_stroke & mask_stroke).sum().item()
+                false_positive += (pred_stroke & ~mask_stroke).sum().item()
+                false_negative += (~pred_stroke & mask_stroke).sum().item()
         
         val_loss /= len(val_loader)
         pixel_acc = correct_pixels / total_pixels
+        iou = intersection_stroke / union_stroke if union_stroke > 0 else 0
+        precision = true_positive / (true_positive + false_positive) if (true_positive + false_positive) > 0 else 0
+        recall = true_positive / (true_positive + false_negative) if (true_positive + false_negative) > 0 else 0
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
         
-        print(f"Epoch {epoch+1}/{args.epochs} - Train Loss: {train_loss:.4f} - Val Loss: {val_loss:.4f} - Pixel Acc: {pixel_acc:.4f}")
+        # Log metrics
+        print(f"Epoch {epoch+1}/{args.epochs} - Train Loss: {train_loss:.4f} - Val Loss: {val_loss:.4f}")
+        print(f"  Pixel Acc: {pixel_acc:.4f} | IoU: {iou:.4f} | F1: {f1:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f}")
         
-        # Save best model
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['val_iou'].append(iou)
+        history['val_f1'].append(f1)
+        
+        # Save best model (based on F1 score for balanced metric)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), args.output_dir / "whiteboard_seg_best.pt")
-            print(f"  Saved best model (val_loss={val_loss:.4f})")
+            print(f"  ✓ Saved best model (val_loss={val_loss:.4f}, F1={f1:.4f})")
+            patience_counter = 0
+        else:
+            patience_counter += 1
+        
+        # Early stopping
+        if patience_counter >= args.patience:
+            print(f"\nEarly stopping triggered after {epoch+1} epochs (no improvement for {args.patience} epochs)")
+            break
         
         scheduler.step()
     
-    # Save final model
+    # Save final model and history
     torch.save(model.state_dict(), args.output_dir / "whiteboard_seg_final.pt")
-    print("\nTraining complete!")
+    with open(args.output_dir / "training_history.json", 'w') as f:
+        json.dump(history, f, indent=2)
     
+    print("\nTraining complete!")
+    print(f"Best validation loss: {best_val_loss:.4f}")
     return model
 
 
 def export_onnx(model, args):
-    """Export trained model to ONNX format (or TorchScript if ONNX fails)"""
+    """Export trained model to ONNX format"""
     print("\nExporting model...")
     
     model.eval()
-    dummy_input = torch.randn(1, 3, 480, 640)
+    dummy_input = torch.randn(1, 3, args.img_height, args.img_width)
     
     onnx_path = args.output_dir / "whiteboard_seg.onnx"
-    torchscript_path = args.output_dir / "whiteboard_seg_scripted.pt"
+    torchscript_path = args.output_dir / "whiteboard_seg.pts"
     
-    # Try ONNX export first
+    # Try ONNX export
     try:
         torch.onnx.export(
             model,
@@ -262,64 +375,20 @@ def export_onnx(model, args):
             dynamic_axes={'input': {0: 'batch'}, 'output': {0: 'batch'}},
             do_constant_folding=True
         )
-        
         print(f"✓ Exported to ONNX: {onnx_path}")
-        
-        # Try to verify if onnx is available (optional)
-        try:
-            import onnx
-            onnx_model = onnx.load(str(onnx_path))
-            onnx.checker.check_model(onnx_model)
-            print("✓ ONNX model verified successfully")
-        except ImportError:
-            print("  (ONNX verification skipped - onnx package not installed)")
-        
         return onnx_path
-        
     except Exception as e:
         print(f"ONNX export failed: {e}")
-        print("Falling back to TorchScript export...")
         
-        # Fallback: Export as TorchScript
+        # Fallback: TorchScript
         try:
             scripted_model = torch.jit.trace(model, dummy_input)
             scripted_model.save(str(torchscript_path))
             print(f"✓ Exported to TorchScript: {torchscript_path}")
-            print("  (TorchScript can be converted to ONNX later with proper tools)")
             return torchscript_path
         except Exception as e2:
             print(f"TorchScript export also failed: {e2}")
             return None
-
-
-def quantize_model(onnx_path, args):
-    """Quantize ONNX model to INT8"""
-    print("\nQuantizing to INT8...")
-    
-    try:
-        from onnxruntime.quantization import quantize_dynamic, QuantType
-    except ImportError:
-        print("onnxruntime not installed - skipping quantization")
-        return None
-    
-    output_path = args.output_dir / "whiteboard_seg_int8.onnx"
-    
-    quantize_dynamic(
-        str(onnx_path),
-        str(output_path),
-        weight_type=QuantType.QInt8,
-        optimize_model=True
-    )
-    
-    # Check file sizes
-    original_size = onnx_path.stat().st_size / (1024 * 1024)
-    quantized_size = output_path.stat().st_size / (1024 * 1024)
-    
-    print(f"Original model: {original_size:.2f} MB")
-    print(f"Quantized model: {quantized_size:.2f} MB")
-    print(f"Size reduction: {(1 - quantized_size/original_size)*100:.1f}%")
-    
-    return output_path
 
 
 def main():
@@ -328,14 +397,22 @@ def main():
                        help="Path to dataset directory")
     parser.add_argument("--output-dir", type=str, default="models",
                        help="Output directory for trained models")
-    parser.add_argument("--epochs", type=int, default=25,
+    parser.add_argument("--epochs", type=int, default=100,
                        help="Number of training epochs")
-    parser.add_argument("--batch-size", type=int, default=4,
-                       help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-3,
+    parser.add_argument("--batch-size", type=int, default=2,
+                       help="Batch size (use 1 for tiny datasets)")
+    parser.add_argument("--lr", type=float, default=2e-4,
                        help="Learning rate")
-    parser.add_argument("--num-classes", type=int, default=4,
-                       help="Number of classes (4: bg, stroke, smudge, shadow)")
+    parser.add_argument("--num-classes", type=int, default=2,
+                       help="Number of classes (2: background, stroke)")
+    parser.add_argument("--img-height", type=int, default=768,
+                       help="Image height for training")
+    parser.add_argument("--img-width", type=int, default=1024,
+                       help="Image width for training")
+    parser.add_argument("--warmup-epochs", type=int, default=5,
+                       help="Number of warmup epochs")
+    parser.add_argument("--patience", type=int, default=15,
+                       help="Early stopping patience")
     parser.add_argument("--skip-training", action="store_true",
                        help="Skip training and only export existing model")
     
@@ -358,23 +435,12 @@ def main():
     # Export to ONNX
     onnx_path = export_onnx(model, args)
     
-    # Quantize (only if ONNX export succeeded)
-    if onnx_path:
-        quantized_path = quantize_model(onnx_path, args)
-    else:
-        quantized_path = None
-        print("\nSkipping quantization (ONNX export was skipped)")
-    
     print("\n" + "="*60)
     print("MODEL TRAINING COMPLETE")
     print("="*60)
-    if quantized_path:
-        print(f"Quantized INT8 model: {quantized_path}")
-        print(f"Target size: 3-5 MB")
-        print(f"Ready for deployment with DirectML/ONNX Runtime")
-    else:
-        print(f"PyTorch model saved: {args.output_dir / 'whiteboard_seg_best.pt'}")
-        print("ONNX export skipped - install 'onnx' package to export")
+    print(f"PyTorch model: {args.output_dir / 'whiteboard_seg_best.pt'}")
+    if onnx_path:
+        print(f"Exported model: {onnx_path}")
     print("="*60)
 
 
