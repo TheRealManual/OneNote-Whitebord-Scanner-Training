@@ -1,0 +1,10 @@
+torch>=2.0.0
+torchvision>=0.15.0
+pillow>=9.0.0
+numpy>=1.22.0
+flask>=3.0.0
+flask-cors>=4.0.0
+onnxruntime>=1.16.0
+
+# Optional dependencies
+# onnx>=1.15.0  # May fail on Windows due to path limits - install manually if needed
