@@ -5,8 +5,8 @@ from PIL import Image
 import numpy as np
 import os
 
-masks_dir = 'dataset/masks'
-images_dir = 'dataset/images'
+masks_dir = './masks'
+images_dir = './images'
 
 # Get all mask files
 mask_files = sorted([f for f in os.listdir(masks_dir) if f.endswith('.png')])

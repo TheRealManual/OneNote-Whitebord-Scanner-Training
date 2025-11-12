@@ -263,11 +263,78 @@ def visualize(image_path, mask_path, prediction, save_path):
     plt.close()
 
 
+def select_images(images):
+    """Interactive image selection"""
+    print("\n" + "="*70)
+    print("AVAILABLE IMAGES")
+    print("="*70)
+    
+    for idx, img_path in enumerate(images, 1):
+        print(f"  {idx:2d}. {img_path.name}")
+    
+    print("="*70)
+    print("\nSelection options:")
+    print("  - Enter numbers (e.g., '1 3 5' or '1-5' or '1,3,5')")
+    print("  - Enter 'all' to test all images")
+    print("  - Press Enter to exit")
+    print("="*70)
+    
+    while True:
+        selection = input("\nSelect images to test: ").strip()
+        
+        if not selection:
+            print("No images selected. Exiting.")
+            return []
+        
+        if selection.lower() == 'all':
+            return images
+        
+        try:
+            selected_indices = set()
+            
+            # Parse selection
+            parts = selection.replace(',', ' ').split()
+            for part in parts:
+                if '-' in part:
+                    # Range (e.g., "1-5")
+                    start, end = part.split('-')
+                    selected_indices.update(range(int(start), int(end) + 1))
+                else:
+                    # Single number
+                    selected_indices.add(int(part))
+            
+            # Validate and convert to image paths
+            selected_images = []
+            invalid = []
+            
+            for idx in sorted(selected_indices):
+                if 1 <= idx <= len(images):
+                    selected_images.append(images[idx - 1])
+                else:
+                    invalid.append(idx)
+            
+            if invalid:
+                print(f"⚠️  Invalid indices: {invalid} (valid range: 1-{len(images)})")
+                continue
+            
+            if selected_images:
+                print(f"\n✓ Selected {len(selected_images)} image(s):")
+                for img in selected_images:
+                    print(f"  - {img.name}")
+                return selected_images
+            else:
+                print("⚠️  No valid images selected. Try again.")
+        
+        except Exception as e:
+            print(f"⚠️  Invalid input: {e}. Try again.")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Test model with PRODUCTION settings")
-    parser.add_argument("--model", type=str, default="models/whiteboard_seg_best.pt")
-    parser.add_argument("--dataset", type=str, default="dataset")
+    parser.add_argument("--model", type=str, default="../models/whiteboard_seg_best.pt")
+    parser.add_argument("--dataset", type=str, default="../dataset")
     parser.add_argument("--output", type=str, default="test_results_production")
+    parser.add_argument("--auto", action="store_true", help="Auto-test all images without selection")
     
     args = parser.parse_args()
     
@@ -291,14 +358,30 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(exist_ok=True)
     
-    # Get images
-    images = sorted(list(img_dir.glob("*.jpg")) + list(img_dir.glob("*.png")))
+    # Get all images
+    all_images = sorted(list(img_dir.glob("*.jpg")) + list(img_dir.glob("*.png")))
     
-    print(f"Testing {len(images)} images...\n")
+    if not all_images:
+        print(f"❌ No images found in {img_dir}")
+        return
+    
+    # Select images
+    if args.auto:
+        images = all_images
+        print(f"Auto mode: Testing all {len(images)} images\n")
+    else:
+        images = select_images(all_images)
+        if not images:
+            return
+    
+    print(f"\n{'='*70}")
+    print(f"TESTING {len(images)} IMAGE(S)")
+    print("="*70 + "\n")
     
     all_metrics = []
     
-    for img_path in images:
+    for idx, img_path in enumerate(images, 1):
+        print(f"[{idx}/{len(images)}] 📄 {img_path.name}")
         print(f"📄 {img_path.name}")
         mask_path = mask_dir / img_path.name.replace(".jpg", ".png")
         

@@ -8,21 +8,24 @@ from PIL import Image
 import numpy as np
 import os
 
-masks_dir = 'dataset/masks'
-backup_dir = 'dataset/masks_backup'
+masks_dir = './masks'
+backup_dir = './masks_backup'
 
 # Create backup directory
 os.makedirs(backup_dir, exist_ok=True)
 
 # List of corrupted masks
 bad_masks = [
-    'image_5.png',
-    'image_6.png', 
-    'image_7.png',
-    'image_8.png',
-    'image_9.png',
-    'image_10.png',
-    'image_11.png'
+    'image_12.png',
+    'image_13.png', 
+    'image_14.png',
+    'image_15.png',
+    'image_16.png',
+    'image_17.png',
+    'image_18.png',
+    'image_19.png',
+    'image_20.png',
+    'image_21.png'
 ]
 
 print('=' * 70)

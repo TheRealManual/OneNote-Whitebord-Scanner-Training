@@ -1,7 +1,7 @@
 # Training data and models - too large for git
-dataset/images/*.jpg
-dataset/images/*.png
-dataset/masks/*.png
+# dataset/images/*.jpg
+# dataset/images/*.png
+# dataset/masks/*.png
 
 # Trained models
 models/*.pt

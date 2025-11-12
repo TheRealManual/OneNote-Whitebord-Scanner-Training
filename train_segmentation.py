@@ -140,8 +140,21 @@ class WhiteboardDataset(Dataset):
         img_path = self.img_dir / self.files[idx]
         img = Image.open(img_path).convert("RGB")
         
-        # Load mask
-        mask_path = self.mask_dir / self.files[idx].replace(".jpg", ".png")
+        # Load mask - handle augmented images
+        img_filename = self.files[idx]
+        
+        # Check if this is an augmented image (e.g., "image_1_aug00.png")
+        if "_aug" in img_filename:
+            # Extract original image name (e.g., "image_1_aug00.png" -> "image_1.png")
+            base_name = img_filename.split("_aug")[0]
+            # Try common extensions
+            mask_path = self.mask_dir / f"{base_name}.png"
+            if not mask_path.exists():
+                mask_path = self.mask_dir / f"{base_name}.jpg"
+        else:
+            # Original image - use standard mask naming
+            mask_path = self.mask_dir / img_filename.replace(".jpg", ".png")
+        
         mask = Image.open(mask_path).convert("L")
         
         # Resize
@@ -197,7 +210,37 @@ def train_model(args):
     """Train DeepLabV3-MobileNetV3 on whiteboard dataset"""
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    
+    # Detailed CUDA verification
+    print("\n" + "="*60)
+    print("DEVICE CONFIGURATION")
+    print("="*60)
+    print(f"PyTorch version: {torch.__version__}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    
+    if torch.cuda.is_available():
+        print(f"CUDA version: {torch.version.cuda}")
+        print(f"GPU device: {torch.cuda.get_device_name(0)}")
+        print(f"GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+        print(f"Using device: {device} ✓")
+    else:
+        print(f"Using device: {device}")
+        print("⚠️  WARNING: CUDA not available - training will be VERY slow on CPU!")
+        print("⚠️  If you have a GPU, check CUDA installation:")
+        print("   - Ensure NVIDIA drivers are installed")
+        print("   - Install CUDA-enabled PyTorch: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121")
+    
+    print("="*60 + "\n")
+    
+    # Enable Automatic Mixed Precision (AMP) for faster GPU training
+    use_amp = args.use_amp and torch.cuda.is_available()
+    if use_amp:
+        print("✓ AMP enabled - using mixed precision training (2x faster)\n")
+        scaler = torch.cuda.amp.GradScaler()
+    else:
+        if args.use_amp and not torch.cuda.is_available():
+            print("⚠️  AMP requested but CUDA not available - using FP32\n")
+        scaler = None
     
     # Create datasets with higher resolution
     img_size = (args.img_height, args.img_width)
@@ -256,18 +299,34 @@ def train_model(args):
         for batch_idx, (imgs, masks) in enumerate(train_loader):
             imgs, masks = imgs.to(device), masks.to(device)
             
-            # Forward
-            model_output = model(imgs)
-            if isinstance(model_output, dict):
-                outputs = model_output["out"]
+            # Forward pass with AMP
+            if use_amp:
+                with torch.cuda.amp.autocast():
+                    model_output = model(imgs)
+                    if isinstance(model_output, dict):
+                        outputs = model_output["out"]
+                    else:
+                        outputs = model_output
+                    loss = criterion(outputs, masks)
+                
+                # Backward pass with gradient scaling
+                optimizer.zero_grad()
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
             else:
-                outputs = model_output
-            loss = criterion(outputs, masks)
-            
-            # Backward
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+                # Standard FP32 training
+                model_output = model(imgs)
+                if isinstance(model_output, dict):
+                    outputs = model_output["out"]
+                else:
+                    outputs = model_output
+                loss = criterion(outputs, masks)
+                
+                # Backward
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
             
             train_loss += loss.item()
         
@@ -413,6 +472,8 @@ def main():
                        help="Number of warmup epochs")
     parser.add_argument("--patience", type=int, default=15,
                        help="Early stopping patience")
+    parser.add_argument("--use-amp", action="store_true",
+                       help="Use Automatic Mixed Precision for faster GPU training (2x speedup)")
     parser.add_argument("--skip-training", action="store_true",
                        help="Skip training and only export existing model")
     
