@@ -28,6 +28,7 @@ import os
 from pathlib import Path
 import argparse
 import json
+from tqdm import tqdm
 
 
 class DiceLoss(nn.Module):
@@ -236,7 +237,7 @@ def train_model(args):
     use_amp = args.use_amp and torch.cuda.is_available()
     if use_amp:
         print("✓ AMP enabled - using mixed precision training (2x faster)\n")
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.amp.GradScaler('cuda')
     else:
         if args.use_amp and not torch.cuda.is_available():
             print("⚠️  AMP requested but CUDA not available - using FP32\n")
@@ -247,11 +248,23 @@ def train_model(args):
     train_dataset = WhiteboardDataset(args.data_dir, train=True, augment=True, img_size=img_size)
     val_dataset = WhiteboardDataset(args.data_dir, train=False, augment=False, img_size=img_size)
     
-    # DataLoader
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, 
-                             shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, 
-                           shuffle=False, num_workers=0)
+    # DataLoader with parallel workers and prefetching for maximum GPU utilization
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=args.batch_size, 
+        shuffle=True, 
+        num_workers=12,
+        pin_memory=True,
+        prefetch_factor=2
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=args.batch_size, 
+        shuffle=False, 
+        num_workers=12,
+        pin_memory=True,
+        prefetch_factor=2
+    )
     
     # Create model
     print("Loading DeepLabV3-MobileNetV3 Large...")
@@ -296,12 +309,13 @@ def train_model(args):
             model.eval()
         
         train_loss = 0
-        for batch_idx, (imgs, masks) in enumerate(train_loader):
+        train_loader_progress = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]", leave=False)
+        for batch_idx, (imgs, masks) in enumerate(train_loader_progress):
             imgs, masks = imgs.to(device), masks.to(device)
             
             # Forward pass with AMP
             if use_amp:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     model_output = model(imgs)
                     if isinstance(model_output, dict):
                         outputs = model_output["out"]
