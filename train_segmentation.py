@@ -298,10 +298,88 @@ def train_model(args):
     
     # Training loop with early stopping
     best_val_loss = float('inf')
+    best_val_f1 = 0.0
     patience_counter = 0
-    history = {'train_loss': [], 'val_loss': [], 'val_iou': [], 'val_f1': []}
+    
+    import datetime
+    import platform
+    
+    history = {
+        'train_loss': [], 
+        'val_loss': [], 
+        'val_iou': [], 
+        'val_f1': [],
+        'config': {
+            # Model Architecture
+            'model': 'DeepLabV3-MobileNetV3-Large',
+            'num_classes': args.num_classes,
+            'pretrained': True,
+            
+            # Training Hyperparameters
+            'epochs': args.epochs,
+            'batch_size': args.batch_size,
+            'learning_rate': args.lr,
+            'optimizer': 'AdamW',
+            'weight_decay': 1e-4,
+            
+            # Loss Function
+            'loss_function': 'CombinedLoss',
+            'dice_weight': 0.6,
+            'focal_weight': 0.4,
+            'focal_alpha': 0.25,
+            'focal_gamma': 2.0,
+            
+            # Learning Rate Schedule
+            'scheduler': 'CosineAnnealingLR with warmup',
+            'warmup_epochs': args.warmup_epochs,
+            
+            # Regularization & Stopping
+            'patience': args.patience,
+            'early_stopping': True,
+            
+            # Data Configuration
+            'img_height': args.img_height,
+            'img_width': args.img_width,
+            'img_resolution': f'{args.img_width}x{args.img_height}',
+            'num_train_images': len(train_dataset),
+            'num_val_images': len(val_dataset),
+            'train_val_split': '80/20',
+            'augmentation': True,
+            
+            # Performance Optimization
+            'use_amp': use_amp,
+            'num_workers': 12,
+            'pin_memory': True,
+            'prefetch_factor': 2,
+            
+            # Hardware & Environment
+            'device': str(device),
+            'cuda_available': torch.cuda.is_available(),
+            'gpu_name': torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            'pytorch_version': torch.__version__,
+            'python_version': platform.python_version(),
+            'platform': platform.system(),
+            
+            # Metadata for Analysis
+            'training_start_time': datetime.datetime.now().isoformat(),
+            'data_dir': str(args.data_dir),
+        },
+        'results': {
+            # Will be filled at end of training
+            'best_val_loss': None,
+            'best_val_f1': None,
+            'best_val_iou': None,
+            'final_epoch': None,
+            'total_training_time_seconds': None,
+            'early_stopped': False,
+        },
+        'epoch_times': []  # Track time per epoch for performance analysis
+    }
     
     for epoch in range(args.epochs):
+        import time
+        epoch_start_time = time.time()
+        
         # Train
         if not small_data:
             model.train()
@@ -400,21 +478,59 @@ def train_model(args):
         history['val_iou'].append(iou)
         history['val_f1'].append(f1)
         
-        # Save best model (based on F1 score for balanced metric)
+        # Save best model (based on val_loss, track best F1)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_val_f1 = f1
+            best_val_iou = iou
+            best_epoch = epoch + 1
             torch.save(model.state_dict(), args.output_dir / "whiteboard_seg_best.pt")
             print(f"  ✓ Saved best model (val_loss={val_loss:.4f}, F1={f1:.4f})")
             patience_counter = 0
         else:
             patience_counter += 1
         
+        # Track overall best F1 and IoU even if not best loss
+        if f1 > best_val_f1:
+            best_val_f1 = f1
+        
+        # Track best IoU (handle None initialization)
+        current_best_iou = history['results'].get('best_val_iou')
+        if current_best_iou is None or iou > current_best_iou:
+            history['results']['best_val_iou'] = iou
+        
+        # Record epoch time
+        epoch_time = time.time() - epoch_start_time
+        history['epoch_times'].append(round(epoch_time, 2))
+        
         # Early stopping
         if patience_counter >= args.patience:
             print(f"\nEarly stopping triggered after {epoch+1} epochs (no improvement for {args.patience} epochs)")
+            history['results']['early_stopped'] = True
+            history['results']['final_epoch'] = epoch + 1
             break
         
         scheduler.step()
+    
+    # Calculate training time and finalize results
+    import time
+    training_end_time = datetime.datetime.now()
+    training_start_time = datetime.datetime.fromisoformat(history['config']['training_start_time'])
+    total_training_seconds = (training_end_time - training_start_time).total_seconds()
+    
+    # Update final results
+    if 'final_epoch' not in history['results'] or history['results']['final_epoch'] is None:
+        history['results']['final_epoch'] = args.epochs
+        history['results']['early_stopped'] = False
+    
+    history['results']['best_val_loss'] = float(best_val_loss)
+    history['results']['best_val_f1'] = float(best_val_f1)
+    history['results']['best_val_iou'] = float(best_val_iou) if 'best_val_iou' in locals() else float(max(history['val_iou']))
+    history['results']['best_epoch'] = int(best_epoch) if 'best_epoch' in locals() else int(np.argmin(history['val_loss']) + 1)
+    history['results']['total_training_time_seconds'] = round(total_training_seconds, 2)
+    history['results']['avg_epoch_time_seconds'] = round(np.mean(history['epoch_times']), 2) if history['epoch_times'] else None
+    history['results']['total_training_time_formatted'] = f"{int(total_training_seconds // 60)}m {int(total_training_seconds % 60)}s"
+    history['config']['training_end_time'] = training_end_time.isoformat()
     
     # Save final model and history
     torch.save(model.state_dict(), args.output_dir / "whiteboard_seg_final.pt")
@@ -423,6 +539,8 @@ def train_model(args):
     
     print("\nTraining complete!")
     print(f"Best validation loss: {best_val_loss:.4f}")
+    print(f"Best F1 score: {best_val_f1:.4f}")
+    print(f"Best IoU: {history['results']['best_val_iou']:.4f}")
     return model
 
 
@@ -430,7 +548,10 @@ def export_onnx(model, args):
     """Export trained model to ONNX format"""
     print("\nExporting model...")
     
+    # Move model to CPU for export (avoids device mismatch issues)
+    model = model.cpu()
     model.eval()
+    
     dummy_input = torch.randn(1, 3, args.img_height, args.img_width)
     
     onnx_path = args.output_dir / "whiteboard_seg.onnx"
