@@ -24,6 +24,7 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 from PIL import Image, ImageFilter, ImageEnhance
 import numpy as np
+import cv2
 import os
 from pathlib import Path
 import argparse
@@ -71,10 +72,10 @@ class FocalLoss(nn.Module):
 
 class CombinedLoss(nn.Module):
     """Combination of Dice Loss and Focal Loss for best results"""
-    def __init__(self, dice_weight=0.6, focal_weight=0.4):
+    def __init__(self, dice_weight=0.6, focal_weight=0.4, focal_alpha=0.25, focal_gamma=2.0):
         super(CombinedLoss, self).__init__()
         self.dice = DiceLoss()
-        self.focal = FocalLoss(alpha=0.25, gamma=2.0)
+        self.focal = FocalLoss(alpha=focal_alpha, gamma=focal_gamma)
         self.dice_weight = dice_weight
         self.focal_weight = focal_weight
     
@@ -195,6 +196,14 @@ class WhiteboardDataset(Dataset):
             # Random sharpening
             if np.random.rand() > 0.7:
                 img = img.filter(ImageFilter.SHARPEN)
+            
+            # CRITICAL: Slight mask erosion to prevent small text merging
+            # This teaches the model to keep letters separated even when close together
+            if np.random.rand() > 0.6:  # 40% of the time
+                mask_array = np.array(mask)
+                kernel = np.ones((2, 2), np.uint8)  # Small kernel for subtle effect
+                mask_array = cv2.erode(mask_array, kernel, iterations=1)
+                mask = Image.fromarray(mask_array)
         
         # Convert to tensors
         img_tensor = self.img_transform(img)
@@ -283,10 +292,15 @@ def train_model(args):
         model.eval()
     
     # Use Combined Loss (Dice + Focal) for best accuracy
-    criterion = CombinedLoss(dice_weight=0.6, focal_weight=0.4)
+    criterion = CombinedLoss(
+        dice_weight=args.dice_weight, 
+        focal_weight=args.focal_weight,
+        focal_alpha=args.focal_alpha,
+        focal_gamma=args.focal_gamma
+    )
     
     # Optimizer with weight decay
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     
     # Learning rate scheduler with warmup
     def lr_lambda(epoch):
@@ -320,14 +334,14 @@ def train_model(args):
             'batch_size': args.batch_size,
             'learning_rate': args.lr,
             'optimizer': 'AdamW',
-            'weight_decay': 1e-4,
+            'weight_decay': args.weight_decay,
             
             # Loss Function
             'loss_function': 'CombinedLoss',
-            'dice_weight': 0.6,
-            'focal_weight': 0.4,
-            'focal_alpha': 0.25,
-            'focal_gamma': 2.0,
+            'dice_weight': args.dice_weight,
+            'focal_weight': args.focal_weight,
+            'focal_alpha': args.focal_alpha,
+            'focal_gamma': args.focal_gamma,
             
             # Learning Rate Schedule
             'scheduler': 'CosineAnnealingLR with warmup',
@@ -597,12 +611,22 @@ def main():
                        help="Batch size (use 1 for tiny datasets)")
     parser.add_argument("--lr", type=float, default=2e-4,
                        help="Learning rate")
+    parser.add_argument("--weight-decay", type=float, default=1e-4,
+                       help="Weight decay for optimizer regularization")
     parser.add_argument("--num-classes", type=int, default=2,
                        help="Number of classes (2: background, stroke)")
     parser.add_argument("--img-height", type=int, default=768,
                        help="Image height for training")
     parser.add_argument("--img-width", type=int, default=1024,
                        help="Image width for training")
+    parser.add_argument("--dice-weight", type=float, default=0.6,
+                       help="Weight for Dice loss in combined loss (default: 0.6)")
+    parser.add_argument("--focal-weight", type=float, default=0.4,
+                       help="Weight for Focal loss in combined loss (default: 0.4)")
+    parser.add_argument("--focal-alpha", type=float, default=0.25,
+                       help="Focal loss alpha parameter - balance between classes (default: 0.25)")
+    parser.add_argument("--focal-gamma", type=float, default=2.0,
+                       help="Focal loss gamma parameter - focus on hard examples (default: 2.0)")
     parser.add_argument("--warmup-epochs", type=int, default=5,
                        help="Number of warmup epochs")
     parser.add_argument("--patience", type=int, default=15,

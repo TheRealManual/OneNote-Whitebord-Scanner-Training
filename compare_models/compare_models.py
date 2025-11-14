@@ -134,8 +134,17 @@ def load_model_and_config(model_dir):
         print(f"  Config: {config_path.name}")
         if 'config' in config:
             cfg = config['config']
+            # Display core training parameters
             print(f"    Batch: {cfg.get('batch_size')}, LR: {cfg.get('learning_rate')}, "
                   f"Resolution: {cfg.get('img_resolution')}")
+            # Display optimizer and loss parameters (with backward compatibility)
+            wd = cfg.get('weight_decay', 1e-4)
+            dice = cfg.get('dice_weight', 0.6)
+            focal = cfg.get('focal_weight', 0.4)
+            f_alpha = cfg.get('focal_alpha', 0.25)
+            f_gamma = cfg.get('focal_gamma', 2.0)
+            print(f"    Weight Decay: {wd}, Dice/Focal: {dice}/{focal}")
+            print(f"    Focal Loss: alpha={f_alpha}, gamma={f_gamma}")
     else:
         print(f"  ⚠️  No config found: {config_path}")
     
@@ -349,14 +358,21 @@ def generate_recommendations(config1, config2, results1, results2):
         if 'weight_decay' in hyper_diffs:
             wd_better = hyper_diffs['weight_decay']['model_1'] if winner_is_1 else hyper_diffs['weight_decay']['model_2']
             wd_worse = hyper_diffs['weight_decay']['model_2'] if winner_is_1 else hyper_diffs['weight_decay']['model_1']
+            
+            # Handle None values (old models without this parameter)
+            wd_better = wd_better if wd_better is not None else 1e-4
+            wd_worse = wd_worse if wd_worse is not None else 1e-4
+            
             recommendations.append(f"✓ Weight Decay: {wd_better} works better than {wd_worse}")
             
             if wd_better > wd_worse:
                 recommendations.append(f"  → RECOMMENDATION: INCREASE weight decay to {wd_better}")
                 recommendations.append(f"     Benefits: Stronger regularization, reduces overfitting")
+                recommendations.append(f"     Use: --weight-decay {wd_better}")
             else:
                 recommendations.append(f"  → RECOMMENDATION: DECREASE weight decay to {wd_better}")
                 recommendations.append(f"     Benefits: Less regularization, allows model to fit training data better")
+                recommendations.append(f"     Use: --weight-decay {wd_better}")
         
         # Scheduler
         if 'scheduler' in hyper_diffs:
@@ -471,10 +487,43 @@ def generate_recommendations(config1, config2, results1, results2):
             recommendations.append(f"  → RECOMMENDATION: USE {loss_better}")
         
         if 'dice_weight' in loss_diffs or 'focal_weight' in loss_diffs:
-            dice_better = better_cfg.get('dice_weight', 0)
-            focal_better = better_cfg.get('focal_weight', 0)
-            recommendations.append(f"✓ Loss Weights: Dice={dice_better}, Focal={focal_better} works better")
-            recommendations.append(f"  → RECOMMENDATION: SET loss weights to Dice={dice_better}, Focal={focal_better}")
+            dice_better = better_cfg.get('dice_weight', 0.6)  # Default to old value if missing
+            focal_better = better_cfg.get('focal_weight', 0.4)  # Default to old value if missing
+            dice_worse = worse_cfg.get('dice_weight', 0.6)
+            focal_worse = worse_cfg.get('focal_weight', 0.4)
+            
+            recommendations.append(f"✓ Loss Weights: Dice={dice_better}, Focal={focal_better} works better than Dice={dice_worse}, Focal={focal_worse}")
+            recommendations.append(f"  → RECOMMENDATION: SET --dice-weight {dice_better} --focal-weight {focal_better}")
+            
+            # Analyze what the change means
+            if focal_better > focal_worse:
+                recommendations.append(f"     Analysis: Higher focal weight ({focal_better} vs {focal_worse}) reduces false positives")
+                recommendations.append(f"     This helps with precision issues (model over-predicting strokes)")
+            if dice_better > dice_worse:
+                recommendations.append(f"     Analysis: Higher dice weight ({dice_better} vs {dice_worse}) improves overall overlap")
+                recommendations.append(f"     This helps with recall issues (model missing strokes)")
+        
+        if 'focal_alpha' in loss_diffs or 'focal_gamma' in loss_diffs:
+            alpha_better = better_cfg.get('focal_alpha', 0.25)
+            gamma_better = better_cfg.get('focal_gamma', 2.0)
+            alpha_worse = worse_cfg.get('focal_alpha', 0.25)
+            gamma_worse = worse_cfg.get('focal_gamma', 2.0)
+            
+            if alpha_better != alpha_worse:
+                recommendations.append(f"✓ Focal Alpha: {alpha_better} works better than {alpha_worse}")
+                recommendations.append(f"  → RECOMMENDATION: SET --focal-alpha {alpha_better}")
+                if alpha_better > alpha_worse:
+                    recommendations.append(f"     Analysis: Higher alpha focuses more on hard-to-classify regions (small text, thin lines)")
+                else:
+                    recommendations.append(f"     Analysis: Lower alpha gives more balanced training")
+            
+            if gamma_better != gamma_worse:
+                recommendations.append(f"✓ Focal Gamma: {gamma_better} works better than {gamma_worse}")
+                recommendations.append(f"  → RECOMMENDATION: SET --focal-gamma {gamma_better}")
+                if gamma_better > gamma_worse:
+                    recommendations.append(f"     Analysis: Higher gamma puts more emphasis on misclassified pixels")
+                else:
+                    recommendations.append(f"     Analysis: Lower gamma provides smoother loss gradient")
         
         recommendations.append("")
     
