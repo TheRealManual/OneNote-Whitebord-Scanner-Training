@@ -1,0 +1,306 @@
+{
+  "timestamp": "2025-11-20T09:09:02.645686",
+  "model_1": {
+    "config": {
+      "model": "DeepLabV3-MobileNetV3-Large",
+      "num_classes": 2,
+      "pretrained": true,
+      "epochs": 150,
+      "batch_size": 2,
+      "learning_rate": 0.0002,
+      "optimizer": "AdamW",
+      "weight_decay": 0.0001,
+      "loss_function": "CombinedLoss",
+      "dice_weight": 0.6,
+      "focal_weight": 0.4,
+      "focal_alpha": 0.25,
+      "focal_gamma": 2.0,
+      "scheduler": "CosineAnnealingLR with warmup",
+      "warmup_epochs": 5,
+      "patience": 15,
+      "early_stopping": true,
+      "img_height": 1536,
+      "img_width": 1536,
+      "img_resolution": "1536x1536",
+      "num_train_images": 184,
+      "num_val_images": 47,
+      "train_val_split": "80/20",
+      "augmentation": true,
+      "use_amp": true,
+      "num_workers": 12,
+      "pin_memory": true,
+      "prefetch_factor": 2,
+      "device": "cuda",
+      "cuda_available": true,
+      "gpu_name": "NVIDIA GeForce RTX 3080",
+      "pytorch_version": "2.7.1+cu118",
+      "python_version": "3.13.7",
+      "platform": "Windows",
+      "training_start_time": "2025-11-13T04:25:20.330034",
+      "data_dir": "dataset",
+      "training_end_time": "2025-11-13T05:18:17.643652"
+    },
+    "results": {
+      "best_val_loss": 0.1877486789599061,
+      "best_val_f1": 0.7377257786304695,
+      "best_val_iou": 0.5844417687862299,
+      "final_epoch": 137,
+      "total_training_time_seconds": 3177.31,
+      "early_stopped": true,
+      "best_epoch": 122,
+      "avg_epoch_time_seconds": 23.19,
+      "total_training_time_formatted": "52m 57s"
+    },
+    "test_metrics": {
+      "images": [
+        "image_13.png",
+        "image_14.png",
+        "image_15.png",
+        "image_16.png",
+        "image_17.png",
+        "image_28.png",
+        "image_3.png"
+      ],
+      "f1_scores": [
+        0.8803156796243151,
+        0.9755059449591927,
+        0.7427097037376981,
+        0.7554711362024188,
+        0.6650526795785634,
+        0.6555420785846233,
+        0.9030905680934858
+      ],
+      "iou_scores": [
+        0.7862177433447894,
+        0.952183119227897,
+        0.590722529192853,
+        0.6070338408200181,
+        0.4981864597987352,
+        0.48758839391157893,
+        0.8233045881680895
+      ],
+      "average_f1": 0.7968125415400424,
+      "average_iou": 0.6778909534948516
+    }
+  },
+  "model_2": {
+    "config": {
+      "model": "DeepLabV3-MobileNetV3-Large",
+      "num_classes": 2,
+      "pretrained": true,
+      "epochs": 150,
+      "batch_size": 2,
+      "learning_rate": 0.0001,
+      "optimizer": "AdamW",
+      "weight_decay": 0.0001,
+      "loss_function": "CombinedLoss",
+      "dice_weight": 0.6,
+      "focal_weight": 0.4,
+      "focal_alpha": 0.25,
+      "focal_gamma": 2.0,
+      "scheduler": "CosineAnnealingLR with warmup",
+      "warmup_epochs": 5,
+      "patience": 15,
+      "early_stopping": true,
+      "img_height": 2048,
+      "img_width": 2048,
+      "img_resolution": "2048x2048",
+      "num_train_images": 299,
+      "num_val_images": 75,
+      "train_val_split": "80/20",
+      "augmentation": true,
+      "use_amp": true,
+      "num_workers": 12,
+      "pin_memory": true,
+      "prefetch_factor": 2,
+      "device": "cuda",
+      "cuda_available": true,
+      "gpu_name": "NVIDIA GeForce RTX 3080",
+      "pytorch_version": "2.7.1+cu118",
+      "python_version": "3.13.7",
+      "platform": "Windows",
+      "training_start_time": "2025-11-20T02:45:34.835006",
+      "data_dir": "dataset",
+      "training_end_time": "2025-11-20T09:08:03.522821"
+    },
+    "results": {
+      "best_val_loss": 0.1259570897028253,
+      "best_val_f1": 0.8297237564378355,
+      "best_val_iou": 0.7089982053401913,
+      "final_epoch": 93,
+      "total_training_time_seconds": 22948.69,
+      "early_stopped": true,
+      "best_epoch": 78,
+      "avg_epoch_time_seconds": 246.76,
+      "total_training_time_formatted": "382m 28s"
+    },
+    "test_metrics": {
+      "images": [
+        "image_13.png",
+        "image_14.png",
+        "image_15.png",
+        "image_16.png",
+        "image_17.png",
+        "image_28.png",
+        "image_3.png"
+      ],
+      "f1_scores": [
+        0.9065460998250007,
+        0.9781126642036624,
+        0.8139025587454218,
+        0.8200655338586679,
+        0.7518532425688607,
+        0.831580379882186,
+        0.8996942022984538
+      ],
+      "iou_scores": [
+        0.8290665931868865,
+        0.9571629180054743,
+        0.6862021031632339,
+        0.6950093902591712,
+        0.6023756726462839,
+        0.7117138103161398,
+        0.8176765079106603
+      ],
+      "average_f1": 0.8573935259117504,
+      "average_iou": 0.7570295707839786
+    }
+  },
+  "comparison": {
+    "config_differences": {
+      "all_differences": {
+        "training_start_time": {
+          "model_1": "2025-11-13T04:25:20.330034",
+          "model_2": "2025-11-20T02:45:34.835006"
+        },
+        "training_end_time": {
+          "model_1": "2025-11-13T05:18:17.643652",
+          "model_2": "2025-11-20T09:08:03.522821"
+        },
+        "img_height": {
+          "model_1": 1536,
+          "model_2": 2048
+        },
+        "num_train_images": {
+          "model_1": 184,
+          "model_2": 299
+        },
+        "learning_rate": {
+          "model_1": 0.0002,
+          "model_2": 0.0001
+        },
+        "num_val_images": {
+          "model_1": 47,
+          "model_2": 75
+        },
+        "img_resolution": {
+          "model_1": "1536x1536",
+          "model_2": "2048x2048"
+        },
+        "img_width": {
+          "model_1": 1536,
+          "model_2": 2048
+        }
+      },
+      "categorized_differences": {
+        "model_architecture": {},
+        "training_hyperparameters": {
+          "learning_rate": {
+            "model_1": 0.0002,
+            "model_2": 0.0001
+          }
+        },
+        "data_augmentation": {
+          "img_height": {
+            "model_1": 1536,
+            "model_2": 2048
+          },
+          "img_resolution": {
+            "model_1": "1536x1536",
+            "model_2": "2048x2048"
+          },
+          "img_width": {
+            "model_1": 1536,
+            "model_2": 2048
+          }
+        },
+        "loss_function": {},
+        "dataset": {
+          "num_train_images": {
+            "model_1": 184,
+            "model_2": 299
+          },
+          "num_val_images": {
+            "model_1": 47,
+            "model_2": 75
+          }
+        },
+        "hardware_environment": {},
+        "other": {
+          "training_start_time": {
+            "model_1": "2025-11-13T04:25:20.330034",
+            "model_2": "2025-11-20T02:45:34.835006"
+          },
+          "training_end_time": {
+            "model_1": "2025-11-13T05:18:17.643652",
+            "model_2": "2025-11-20T09:08:03.522821"
+          }
+        }
+      },
+      "total_differences": 8
+    },
+    "recommendations": [
+      "================================================================================",
+      "**WINNER: Model 2**",
+      "  F1: 0.8574 vs 0.7968 (7.6% better)",
+      "  IoU: 0.7570 vs 0.6779 (11.7% better)",
+      "  Edge IoU: 0.1102 vs 0.0973 (13.2% better)",
+      "================================================================================",
+      "",
+      "CONFIGURATION ANALYSIS (8 differences found)",
+      "",
+      "\ud83d\udcca TRAINING HYPERPARAMETERS:",
+      "--------------------------------------------------------------------------------",
+      "\u2713 Learning Rate: 0.0002 works better than 0.0001",
+      "  \u2192 RECOMMENDATION: INCREASE learning rate to 0.0002",
+      "     Benefits: Faster convergence, explores loss landscape better",
+      "     Caution: May overshoot optimal weights, reduce if loss oscillates",
+      "",
+      "\ud83d\uddbc\ufe0f  DATA AUGMENTATION & RESOLUTION:",
+      "--------------------------------------------------------------------------------",
+      "\u2713 Resolution: 2048\u00d72048 works better than 1536\u00d71536",
+      "  \u2192 RECOMMENDATION: INCREASE resolution to 2048\u00d72048 or higher",
+      "     Benefits: Better detail preservation, improved thin line detection",
+      "     Trade-off: ~1.8x slower training, more GPU memory",
+      "     Edge IoU improved by 13.2% (critical for thin lines!)",
+      "",
+      "\ud83d\udcc8 PERFORMANCE ANALYSIS:",
+      "--------------------------------------------------------------------------------",
+      "\u26a0\ufe0f  High Recall but Low Precision (many false positives)",
+      "  \u2192 Model is over-predicting strokes",
+      "  \u2192 SUGGESTIONS:",
+      "     \u2022 Lower learning rate for finer weight adjustments",
+      "     \u2022 Increase weight decay for stronger regularization",
+      "     \u2022 Add dropout layers to reduce overfitting",
+      "     \u2022 Increase focal loss weight (vs dice)",
+      "",
+      "\u2713 Excellent performance (F1 > 0.70)!",
+      "  \u2192 Model is production-ready",
+      "",
+      "\u23f1\ufe0f  TRAINING EFFICIENCY:",
+      "--------------------------------------------------------------------------------",
+      "\u26a0\ufe0f  Model 2 is 10.6x SLOWER per epoch (246.8s vs 23.2s)",
+      "  \u2192 Trade-off: Better quality at cost of 91% more time",
+      "  Total training time: 382.5 min vs 53.0 min",
+      "",
+      "================================================================================",
+      "\ud83c\udfaf FINAL RECOMMENDATION:",
+      "================================================================================",
+      "Use Model 2's configuration as baseline:",
+      "  python train_segmentation.py --lr=0.0001 --resolution=2048\u00d72048",
+      "",
+      "Expected performance: F1=0.8574, IoU=0.7570",
+      "================================================================================"
+    ]
+  }
+}

@@ -60,9 +60,9 @@ def export_to_torchscript(model_path, output_path, num_classes=2):
     print(f"Model loaded successfully")
     print(f"Model has {num_classes} output classes")
     
-    # Create example input for tracing - USE TRAINING RESOLUTION (768×1024)
-    # This matches the resolution used in test_model.py for best results
-    example_input = torch.randn(1, 3, 768, 1024)
+    # Create example input for tracing - USE TRAINING RESOLUTION (2560×2560)
+    # This matches the resolution used for the best model
+    example_input = torch.randn(1, 3, 2560, 2560)
     
     # Trace model
     print(f"Tracing model with input shape: {example_input.shape}")
@@ -89,8 +89,8 @@ def export_to_torchscript(model_path, output_path, num_classes=2):
 
 
 if __name__ == "__main__":
-    # Export the best model
-    model_dir = Path(__file__).parent / "models"
+    # Export model 2 (the 2560x2560 trained model)
+    model_dir = Path(__file__).parent / "models_1"
     
     # Try best model first, then final model
     if (model_dir / "whiteboard_seg_best.pt").exists():
@@ -100,7 +100,7 @@ if __name__ == "__main__":
         model_path = model_dir / "whiteboard_seg_final.pt"
         print("Using FINAL model (last epoch)")
     else:
-        raise FileNotFoundError("No trained model found! Train a model first.")
+        raise FileNotFoundError("No trained model found in models_1! Train a model first.")
     
     output_path = model_dir / "whiteboard_seg.pts"
     

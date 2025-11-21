@@ -84,13 +84,13 @@ class AugmentationGenerator:
     def apply_gaussian_blur(self, img, radius=None):
         """Gaussian blur for focus variation"""
         if radius is None:
-            radius = random.uniform(0.3, 1.5)
+            radius = random.uniform(0.2, 0.8)  # Reduced for small stroke preservation
         return img.filter(ImageFilter.GaussianBlur(radius=radius))
     
     def apply_gaussian_noise(self, img, sigma=None):
         """Add realistic camera noise"""
         if sigma is None:
-            sigma = random.uniform(3, 12)
+            sigma = random.uniform(2, 6)  # Reduced for small stroke clarity
         
         img_array = np.array(img).astype(np.float32)
         noise = np.random.normal(0, sigma, img_array.shape)
@@ -103,7 +103,7 @@ class AugmentationGenerator:
         if angle is None:
             angle = random.choice(self.glare_angles)
         if strength is None:
-            strength = random.uniform(0.2, 0.6)
+            strength = random.uniform(0.15, 0.4)  # Reduced for small stroke visibility
         
         img_array = np.array(img).astype(np.float32)
         h, w = img_array.shape[:2]
@@ -150,7 +150,7 @@ class AugmentationGenerator:
         if angle is None:
             angle = random.choice(self.shadow_angles)
         if strength is None:
-            strength = random.uniform(0.15, 0.4)
+            strength = random.uniform(0.1, 0.25)  # Reduced for small stroke preservation
         if num_bands is None:
             num_bands = random.randint(1, 3)
         

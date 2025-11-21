@@ -264,7 +264,8 @@ def train_model(args):
         shuffle=True, 
         num_workers=12,
         pin_memory=True,
-        prefetch_factor=2
+        prefetch_factor=2,
+        drop_last=True  # Prevent batch size 1 errors with batch normalization
     )
     val_loader = DataLoader(
         val_dataset, 
@@ -272,7 +273,8 @@ def train_model(args):
         shuffle=False, 
         num_workers=12,
         pin_memory=True,
-        prefetch_factor=2
+        prefetch_factor=2,
+        drop_last=True  # Prevent batch size 1 errors with batch normalization
     )
     
     # Create model

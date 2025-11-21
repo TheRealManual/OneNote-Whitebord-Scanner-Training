@@ -5,16 +5,16 @@ echo ============================================================
 echo.
 echo python train_segmentation.py 
 echo    --data-dir dataset 
-echo    --epochs 200 
+echo    --epochs 150 
 echo    --batch-size 2 
 echo    --lr 1e-4 
-echo    --weight-decay 3e-4 
-echo    --dice-weight 0.4 
-echo    --focal-weight 0.6 
-echo    --focal-alpha 0.75 
-echo    --img-height 1536 
-echo    --img-width 1536 
-echo    --patience 20 
+echo    --weight-decay 1e-4 
+echo    --dice-weight 0.6 
+echo    --focal-weight 0.4 
+echo    --focal-alpha 0.25 
+echo    --img-height 2560 
+echo    --img-width 2560 
+echo    --patience 15 
 echo    --use-amp 
 echo    --model-dir models_1
 echo .
@@ -22,16 +22,16 @@ pause
 
 python train_segmentation.py ^
     --data-dir dataset ^
-    --epochs 200 ^
+    --epochs 150 ^
     --batch-size 2 ^
     --lr 1e-4 ^
-    --weight-decay 3e-4 ^
-    --dice-weight 0.4 ^
-    --focal-weight 0.6 ^
-    --focal-alpha 0.75 ^
-    --img-height 1536 ^
-    --img-width 1536 ^
-    --patience 20 ^
+    --weight-decay 1e-4 ^
+    --dice-weight 0.6 ^
+    --focal-weight 0.4 ^
+    --focal-alpha 0.25 ^
+    --img-height 2560 ^
+    --img-width 2560 ^
+    --patience 15 ^
     --use-amp ^
     --output-dir models_1
 
