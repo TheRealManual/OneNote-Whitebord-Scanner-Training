@@ -60,9 +60,9 @@ def export_to_torchscript(model_path, output_path, num_classes=2):
     print(f"Model loaded successfully")
     print(f"Model has {num_classes} output classes")
     
-    # Create example input for tracing - USE TRAINING RESOLUTION (2560×2560)
-    # This matches the resolution used for the best model
-    example_input = torch.randn(1, 3, 2560, 2560)
+    # Create example input for tracing - USE TRAINING RESOLUTION (3712×2784)
+    # This matches native camera resolution - full detail preservation
+    example_input = torch.randn(1, 3, 2784, 3712)
     
     # Trace model
     print(f"Tracing model with input shape: {example_input.shape}")
