@@ -59,13 +59,24 @@ def seed_everything(seed):
     print(f"   PYTHONHASHSEED={seed} (best-effort; set in .bat for full effect)")
 
 
-def make_worker_init_fn(seed):
-    """Create a worker_init_fn that seeds each DataLoader worker deterministically."""
-    def worker_init_fn(worker_id):
-        worker_seed = seed + worker_id
+class _WorkerInitFn:
+    """Picklable worker_init_fn for DataLoader multiprocessing on Windows.
+    
+    Using a callable class instead of a closure so it can be pickled
+    by Windows' 'spawn' multiprocessing start method.
+    """
+    def __init__(self, seed):
+        self.seed = seed
+    
+    def __call__(self, worker_id):
+        worker_seed = self.seed + worker_id
         np.random.seed(worker_seed)
         random.seed(worker_seed)
-    return worker_init_fn
+
+
+def make_worker_init_fn(seed):
+    """Create a worker_init_fn that seeds each DataLoader worker deterministically."""
+    return _WorkerInitFn(seed)
 
 
 class DiceLoss(nn.Module):
@@ -202,6 +213,26 @@ def build_loss(args):
     
     print(f"\n📊 Loss function: {loss_name}")
     return criterion, loss_name
+
+
+class ToySegModel(nn.Module):
+    """Tiny segmentation model for fast CPU-only testing.
+    
+    A simple 3-layer conv net that outputs [B, num_classes, H, W]
+    wrapped in a dict with 'out' key to match DeepLabV3 interface.
+    NOT suitable for real training — only for determinism/integration tests.
+    """
+    def __init__(self, num_classes=2):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, 3, padding=1)
+        self.conv2 = nn.Conv2d(16, 16, 3, padding=1)
+        self.conv3 = nn.Conv2d(16, num_classes, 1)
+    
+    def forward(self, x):
+        h = F.relu(self.conv1(x))
+        h = F.relu(self.conv2(h))
+        out = self.conv3(h)
+        return {'out': out}
 
 
 class WhiteboardDataset(Dataset):
@@ -412,12 +443,15 @@ def train_model(args):
     )
     
     # Create model
-    print("Loading DeepLabV3-MobileNetV3 Large...")
-    model = deeplabv3_mobilenet_v3_large(weights="DEFAULT")
-    
-    # Replace classifier for binary segmentation
-    model.classifier[4] = torch.nn.Conv2d(256, args.num_classes, kernel_size=1)
-    model.aux_classifier = None  # Disable aux classifier
+    if getattr(args, 'model', 'deeplabv3') == 'toy':
+        print("Loading ToySegModel (test-only)...")
+        model = ToySegModel(num_classes=args.num_classes)
+    else:
+        print("Loading DeepLabV3-MobileNetV3 Large...")
+        model = deeplabv3_mobilenet_v3_large(weights="DEFAULT")
+        # Replace classifier for binary segmentation
+        model.classifier[4] = torch.nn.Conv2d(256, args.num_classes, kernel_size=1)
+        model.aux_classifier = None  # Disable aux classifier
     
     model = model.to(device)
     
@@ -456,9 +490,9 @@ def train_model(args):
         'val_f1': [],
         'config': {
             # Model Architecture
-            'model': 'DeepLabV3-MobileNetV3-Large',
+            'model': 'ToySegModel' if getattr(args, 'model', 'deeplabv3') == 'toy' else 'DeepLabV3-MobileNetV3-Large',
             'num_classes': args.num_classes,
-            'pretrained': True,
+            'pretrained': getattr(args, 'model', 'deeplabv3') != 'toy',
             
             # Training Hyperparameters
             'epochs': args.epochs,
@@ -758,6 +792,9 @@ def main():
                        help="Image height for training")
     parser.add_argument("--img-width", type=int, default=1024,
                        help="Image width for training")
+    parser.add_argument("--model", type=str, default="deeplabv3",
+                       choices=["deeplabv3", "toy"],
+                       help="Model architecture: deeplabv3 (production) or toy (test-only, fast CPU)")
     parser.add_argument("--loss", type=str, default="dice_focal",
                        choices=["ce", "dice", "focal", "dice_focal", "tversky"],
                        help="Loss function for training (default: dice_focal)")
