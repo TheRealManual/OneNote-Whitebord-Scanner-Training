@@ -58,6 +58,7 @@ COMPARISON_SUMMARY_REQUIRED_KEYS = {
     'pixel_accuracy',
     'dice',
     'edge_iou',
+    'boundary_f1',
 }
 
 BASELINE_RESULTS_REQUIRED_KEYS = {
