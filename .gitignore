@@ -3,6 +3,8 @@
 # dataset/images/*.png
 # dataset/masks/*.png
 
+Research-Paper/*
+
 # Trained models
 models/*.pt
 models/*.onnx
