@@ -26,6 +26,7 @@ from PIL import Image, ImageFilter, ImageEnhance
 import numpy as np
 import cv2
 import os
+import random
 from pathlib import Path
 import argparse
 import json
@@ -37,6 +38,34 @@ from tqdm import tqdm
 REPO_ROOT = Path(__file__).resolve().parent
 PRIVATE_REPO = REPO_ROOT.parent / "SegmentationResearchPaper"
 DEFAULT_OUTPUT_DIR = str(PRIVATE_REPO / "experiments" / "default")
+
+
+def seed_everything(seed):
+    """Set all random seeds for reproducibility.
+    
+    NOTE: For full PYTHONHASHSEED reproducibility, set it at the OS level
+    BEFORE launching Python (e.g., `set PYTHONHASHSEED=42` in .bat).
+    Setting os.environ here is best-effort only.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ['PYTHONHASHSEED'] = str(seed)  # best-effort; set in .bat for full effect
+    print(f"\n\U0001f331 Random seed set to {seed} (deterministic mode)")
+    print(f"   cudnn.deterministic=True, cudnn.benchmark=False")
+    print(f"   PYTHONHASHSEED={seed} (best-effort; set in .bat for full effect)")
+
+
+def make_worker_init_fn(seed):
+    """Create a worker_init_fn that seeds each DataLoader worker deterministically."""
+    def worker_init_fn(worker_id):
+        worker_seed = seed + worker_id
+        np.random.seed(worker_seed)
+        random.seed(worker_seed)
+    return worker_init_fn
 
 
 class DiceLoss(nn.Module):
@@ -226,6 +255,16 @@ class WhiteboardDataset(Dataset):
 def train_model(args):
     """Train DeepLabV3-MobileNetV3 on whiteboard dataset"""
     
+    # Set seeds for reproducibility if requested
+    if args.seed is not None:
+        seed_everything(args.seed)
+    
+    # Optionally enable fully deterministic algorithms
+    if args.deterministic:
+        torch.use_deterministic_algorithms(True)
+        print("\u26a0\ufe0f  torch.use_deterministic_algorithms(True) enabled")
+        print("   Some operations may raise errors if no deterministic implementation exists.")
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # Detailed CUDA verification
@@ -265,21 +304,27 @@ def train_model(args):
     val_dataset = WhiteboardDataset(args.data_dir, train=False, augment=False, img_size=img_size)
     
     # DataLoader with parallel workers and prefetching for maximum GPU utilization
+    # When seed is set, add worker_init_fn and generator for full reproducibility
+    loader_kwargs = dict(
+        num_workers=12,
+        pin_memory=True,
+        prefetch_factor=2,
+    )
+    if args.seed is not None:
+        loader_kwargs['worker_init_fn'] = make_worker_init_fn(args.seed)
+        loader_kwargs['generator'] = torch.Generator().manual_seed(args.seed)
+    
     train_loader = DataLoader(
         train_dataset, 
         batch_size=args.batch_size, 
         shuffle=True, 
-        num_workers=12,
-        pin_memory=True,
-        prefetch_factor=2
+        **loader_kwargs
     )
     val_loader = DataLoader(
         val_dataset, 
         batch_size=args.batch_size, 
         shuffle=False, 
-        num_workers=12,
-        pin_memory=True,
-        prefetch_factor=2
+        **loader_kwargs
     )
     
     # Create model
@@ -380,6 +425,11 @@ def train_model(args):
             'pytorch_version': torch.__version__,
             'python_version': platform.python_version(),
             'platform': platform.system(),
+            
+            # Reproducibility
+            'seed': args.seed,
+            'deterministic': args.deterministic,
+            'pythonhashseed_note': 'Set via .bat for full effect; os.environ is best-effort' if args.seed is not None else None,
             
             # Metadata for Analysis
             'training_start_time': datetime.datetime.now().isoformat(),
@@ -640,6 +690,10 @@ def main():
                        help="Early stopping patience")
     parser.add_argument("--use-amp", action="store_true",
                        help="Use Automatic Mixed Precision for faster GPU training (2x speedup)")
+    parser.add_argument("--seed", type=int, default=None,
+                       help="Random seed for reproducibility (sets random, numpy, torch, cudnn)")
+    parser.add_argument("--deterministic", action="store_true",
+                       help="Enable torch.use_deterministic_algorithms(True) for strict reproducibility (may error on some ops)")
     parser.add_argument("--skip-training", action="store_true",
                        help="Skip training and only export existing model")
     
