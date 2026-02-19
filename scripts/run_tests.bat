@@ -5,7 +5,7 @@ REM Usage: scripts\run_tests.bat
 echo ============================================================
 echo Running pytest...
 echo ============================================================
-python -m pytest -q --maxfail=1
+python -m pytest tests/ -q --maxfail=1
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
 echo.

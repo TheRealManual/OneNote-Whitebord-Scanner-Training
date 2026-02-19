@@ -68,6 +68,58 @@ print()
 # UTILITY FUNCTIONS
 # ============================================================================
 
+def boundary_f1(pred_mask, gt_mask, tolerance=None):
+    """Compute Boundary F1 (BF1) score between predicted and ground-truth masks.
+
+    Uses morphological gradient (dilation − erosion with a 3×3 kernel) to extract
+    boundaries, then computes precision/recall within a distance tolerance.
+
+    Args:
+        pred_mask: uint8 array (H, W), values 0-255.
+        gt_mask:   uint8 array (H, W), values 0-255.
+        tolerance: int pixel tolerance for boundary matching.
+                   If None, auto-scales: round(2 * max(H, W) / 1536), min 1.
+
+    Returns:
+        float BF1 score in [0, 1].
+        Edge cases: both empty → 1.0, one empty → 0.0.
+    """
+    pred_binary = (pred_mask > 127).astype(np.uint8)
+    gt_binary = (gt_mask > 127).astype(np.uint8)
+
+    kernel = np.ones((3, 3), np.uint8)
+
+    # Extract boundaries via morphological gradient
+    pred_boundary = cv2.dilate(pred_binary, kernel) - cv2.erode(pred_binary, kernel)
+    gt_boundary = cv2.dilate(gt_binary, kernel) - cv2.erode(gt_binary, kernel)
+
+    # Edge cases
+    pred_has = pred_boundary.sum() > 0
+    gt_has = gt_boundary.sum() > 0
+    if not pred_has and not gt_has:
+        return 1.0
+    if not pred_has or not gt_has:
+        return 0.0
+
+    # Auto-scale tolerance if not provided
+    H, W = pred_mask.shape[:2]
+    if tolerance is None:
+        tolerance = max(1, round(2 * max(H, W) / 1536))
+
+    # Distance transforms from boundary pixels
+    pred_dist = cv2.distanceTransform(1 - pred_boundary, cv2.DIST_L2, 5)
+    gt_dist = cv2.distanceTransform(1 - gt_boundary, cv2.DIST_L2, 5)
+
+    # Precision: fraction of predicted boundary pixels within tolerance of GT
+    precision = float(np.sum(gt_dist[pred_boundary > 0] <= tolerance)) / float(np.sum(pred_boundary > 0))
+    # Recall: fraction of GT boundary pixels within tolerance of predicted
+    recall = float(np.sum(pred_dist[gt_boundary > 0] <= tolerance)) / float(np.sum(gt_boundary > 0))
+
+    if precision + recall == 0:
+        return 0.0
+    return float(2 * precision * recall / (precision + recall))
+
+
 def calculate_metrics(pred_mask, gt_mask):
     """Calculate comprehensive segmentation metrics"""
     pred_binary = (pred_mask > 127).astype(np.uint8)
@@ -97,6 +149,9 @@ def calculate_metrics(pred_mask, gt_mask):
     gt_edges = cv2.Canny(gt_binary * 255, 100, 200)
     edge_iou = np.logical_and(pred_edges, gt_edges).sum() / np.logical_or(pred_edges, gt_edges).sum() if np.logical_or(pred_edges, gt_edges).sum() > 0 else 0
     
+    # Boundary F1 (morphological gradient, resolution-scaled tolerance)
+    bf1 = boundary_f1(pred_mask, gt_mask)
+    
     return {
         'iou': float(iou),
         'f1': float(f1),
@@ -105,6 +160,7 @@ def calculate_metrics(pred_mask, gt_mask):
         'pixel_acc': float(pixel_acc),
         'dice': float(dice),
         'edge_iou': float(edge_iou),
+        'boundary_f1': float(bf1),
         'tp': int(tp),
         'fp': int(fp),
         'fn': int(fn),
@@ -1113,8 +1169,10 @@ def main():
                     'images': [r['image_name'] for r in all_results_1],
                     'f1_scores': [r['metrics']['f1'] for r in all_results_1],
                     'iou_scores': [r['metrics']['iou'] for r in all_results_1],
+                    'boundary_f1_scores': [r['metrics']['boundary_f1'] for r in all_results_1],
                     'average_f1': float(np.mean([r['metrics']['f1'] for r in all_results_1])),
                     'average_iou': float(np.mean([r['metrics']['iou'] for r in all_results_1])),
+                    'average_boundary_f1': float(np.mean([r['metrics']['boundary_f1'] for r in all_results_1])),
                 }
             },
             'model_2': {
@@ -1124,8 +1182,10 @@ def main():
                     'images': [r['image_name'] for r in all_results_2],
                     'f1_scores': [r['metrics']['f1'] for r in all_results_2],
                     'iou_scores': [r['metrics']['iou'] for r in all_results_2],
+                    'boundary_f1_scores': [r['metrics']['boundary_f1'] for r in all_results_2],
                     'average_f1': float(np.mean([r['metrics']['f1'] for r in all_results_2])),
                     'average_iou': float(np.mean([r['metrics']['iou'] for r in all_results_2])),
+                    'average_boundary_f1': float(np.mean([r['metrics']['boundary_f1'] for r in all_results_2])),
                 }
             },
             'comparison': {
