@@ -238,13 +238,17 @@ class ToySegModel(nn.Module):
 class WhiteboardDataset(Dataset):
     """Dataset for whiteboard images with segmentation masks"""
     
-    def __init__(self, root_dir, train=True, augment=True, img_size=(768, 1024)):
+    def __init__(self, root_dir, train=True, augment=True, img_size=(768, 1024),
+                 exclude_list=None):
         """
         Args:
             root_dir: Path to dataset with images/ and masks/ folders
             train: If True, use training split
             augment: If True, apply data augmentation
             img_size: (height, width) for training - higher = better quality
+            exclude_list: Optional list of base image IDs to exclude (e.g. ['image_3', 'image_22']).
+                         Originals AND augmented variants (image_X_augNN) are excluded
+                         via regex base-ID matching.
         """
         self.root_dir = Path(root_dir)
         self.img_dir = self.root_dir / "images"
@@ -254,6 +258,23 @@ class WhiteboardDataset(Dataset):
         # Get all image files
         self.files = sorted([f.name for f in self.img_dir.glob("*.jpg")] + 
                            [f.name for f in self.img_dir.glob("*.png")])
+        
+        # Exclude test-split images and their augmented variants
+        if exclude_list:
+            import re
+            exclude_set = set(exclude_list)
+            filtered = []
+            for fname in self.files:
+                stem = Path(fname).stem
+                # Extract base ID: "image_3_aug05" → "image_3"
+                m = re.match(r'^(image_\d+)', stem)
+                base_id = m.group(1) if m else stem
+                if base_id not in exclude_set:
+                    filtered.append(fname)
+            n_excluded = len(self.files) - len(filtered)
+            self.files = filtered
+            if n_excluded > 0:
+                print(f"  Excluded {n_excluded} images matching test-split IDs")
         
         if len(self.files) == 0:
             raise ValueError(f"No images found in {self.img_dir}")
@@ -415,8 +436,21 @@ def train_model(args):
     
     # Create datasets with higher resolution
     img_size = (args.img_height, args.img_width)
-    train_dataset = WhiteboardDataset(args.data_dir, train=True, augment=True, img_size=img_size)
-    val_dataset = WhiteboardDataset(args.data_dir, train=False, augment=False, img_size=img_size)
+    
+    # Load test-split exclusion list if provided
+    exclude_list = None
+    if getattr(args, 'test_split_config', None):
+        import json as _json
+        with open(args.test_split_config) as f:
+            split_cfg = _json.load(f)
+        exclude_list = split_cfg.get('train_exclude', [])
+        print(f"\n📋 Test-split config: {args.test_split_config}")
+        print(f"   Excluding {len(exclude_list)} base IDs from training")
+    
+    train_dataset = WhiteboardDataset(args.data_dir, train=True, augment=True, img_size=img_size,
+                                       exclude_list=exclude_list)
+    val_dataset = WhiteboardDataset(args.data_dir, train=False, augment=False, img_size=img_size,
+                                     exclude_list=exclude_list)
     
     # DataLoader with parallel workers and prefetching for maximum GPU utilization
     # When seed is set, add worker_init_fn and generator for full reproducibility
@@ -546,6 +580,10 @@ def train_model(args):
             'seed': args.seed,
             'deterministic': args.deterministic,
             'pythonhashseed_note': 'Set via .bat for full effect; os.environ is best-effort' if args.seed is not None else None,
+            
+            # Test-Split Configuration
+            'test_split_config': getattr(args, 'test_split_config', None),
+            'train_exclude_count': len(exclude_list) if exclude_list else 0,
             
             # Metadata for Analysis
             'training_start_time': datetime.datetime.now().isoformat(),
@@ -822,6 +860,8 @@ def main():
                        help="Enable torch.use_deterministic_algorithms(True) for strict reproducibility (may error on some ops)")
     parser.add_argument("--skip-training", action="store_true",
                        help="Skip training and only export existing model")
+    parser.add_argument("--test-split-config", type=str, default=None,
+                       help="Path to test_splits.json — excludes listed image IDs from training")
     
     args = parser.parse_args()
     

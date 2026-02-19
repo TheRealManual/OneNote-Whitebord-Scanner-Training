@@ -1055,6 +1055,11 @@ def main():
                        help="Path to test images directory")
     parser.add_argument("--masks-dir", type=str, default=str(MASKS_DIR),
                        help="Path to ground truth masks directory")
+    parser.add_argument("--test-split", type=str, default=None,
+                       choices=["core", "thin", "both"],
+                       help="Filter test images by split group (core, thin, or both). Requires --test-split-config.")
+    parser.add_argument("--test-split-config", type=str, default=None,
+                       help="Path to test_splits.json for grouped evaluation")
     args = parser.parse_args()
     
     OUTPUT_DIR = Path(args.output_dir)
@@ -1062,6 +1067,13 @@ def main():
     model_2_dir = Path(args.model_2_dir)
     images_dir = Path(args.images_dir)
     masks_dir = Path(args.masks_dir)
+    
+    # Load test-split groups if configured
+    split_groups = None
+    if args.test_split_config:
+        with open(args.test_split_config) as f:
+            split_groups = json.load(f)
+        print(f"Loaded test-split config: {args.test_split_config}")
     
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
@@ -1083,6 +1095,23 @@ def main():
     
     # Get test images
     image_files = list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png"))
+    
+    # Filter by test-split group if specified
+    if split_groups and args.test_split:
+        import re as _re
+        allowed_ids = set()
+        if args.test_split in ('core', 'both'):
+            allowed_ids.update(split_groups.get('test_core', []))
+        if args.test_split in ('thin', 'both'):
+            allowed_ids.update(split_groups.get('test_thin', []))
+        filtered = []
+        for p in image_files:
+            m = _re.match(r'^(image_\d+)', p.stem)
+            base_id = m.group(1) if m else p.stem
+            if base_id in allowed_ids:
+                filtered.append(p)
+        image_files = filtered
+        print(f"Filtered to {len(image_files)} images for split '{args.test_split}'")
     
     if len(image_files) == 0:
         print(f"❌ No test images found in {images_dir}")
@@ -1193,6 +1222,46 @@ def main():
                 'recommendations': generate_recommendations(config1, config2, all_results_1, all_results_2)
             }
         }
+        
+        # Add grouped metrics if test-split config is loaded
+        if split_groups:
+            import re as _re
+            core_ids = set(split_groups.get('test_core', []))
+            thin_ids = set(split_groups.get('test_thin', []))
+            
+            def _group_avg(results, ids):
+                group = [r for r in results
+                         if (_re.match(r'^(image_\d+)', Path(r['image_name']).stem) or (None,))
+                         and (_re.match(r'^(image_\d+)', Path(r['image_name']).stem).group(1) if _re.match(r'^(image_\d+)', Path(r['image_name']).stem) else '') in ids]
+                if not group:
+                    return {}
+                return {
+                    'count': len(group),
+                    'average_f1': float(np.mean([r['metrics']['f1'] for r in group])),
+                    'average_iou': float(np.mean([r['metrics']['iou'] for r in group])),
+                    'average_boundary_f1': float(np.mean([r['metrics']['boundary_f1'] for r in group])),
+                }
+            
+            summary['grouped_metrics'] = {
+                'overall': {
+                    'model_1': {'count': len(all_results_1),
+                                'average_f1': float(np.mean([r['metrics']['f1'] for r in all_results_1])),
+                                'average_iou': float(np.mean([r['metrics']['iou'] for r in all_results_1])),
+                                'average_boundary_f1': float(np.mean([r['metrics']['boundary_f1'] for r in all_results_1]))},
+                    'model_2': {'count': len(all_results_2),
+                                'average_f1': float(np.mean([r['metrics']['f1'] for r in all_results_2])),
+                                'average_iou': float(np.mean([r['metrics']['iou'] for r in all_results_2])),
+                                'average_boundary_f1': float(np.mean([r['metrics']['boundary_f1'] for r in all_results_2]))},
+                },
+                'core': {
+                    'model_1': _group_avg(all_results_1, core_ids),
+                    'model_2': _group_avg(all_results_2, core_ids),
+                },
+                'thin': {
+                    'model_1': _group_avg(all_results_1, thin_ids),
+                    'model_2': _group_avg(all_results_2, thin_ids),
+                },
+            }
         
         json_output_path = OUTPUT_DIR / "comparison_summary.json"
         with open(json_output_path, 'w') as f:
