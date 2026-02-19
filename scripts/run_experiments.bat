@@ -7,16 +7,19 @@ REM   1. Loss ablation study: 5 losses × 3 seeds × 1536 resolution
 REM   2. Resolution study:   2 resolutions × 3 seeds × best loss
 REM   3. Classical baseline
 REM
-REM All outputs go to ../SegmentationResearchPaper/experiments/
+REM Training outputs go to ../SegmentationResearchPaper/experiments/
+REM Baseline/aggregate results go to ../SegmentationResearchPaper/results/
 REM ============================================================================
 
-set RESULTS_DIR=..\SegmentationResearchPaper\experiments
+set EXPERIMENTS_DIR=..\SegmentationResearchPaper\experiments
+set RESULTS_DIR=..\SegmentationResearchPaper\results
 set SPLITS_CFG=..\SegmentationResearchPaper\configs\test_splits.json
 
 echo ============================================================
 echo WHITEBOARD SEGMENTATION - FULL EXPERIMENT SUITE
 echo ============================================================
-echo Results: %RESULTS_DIR%
+echo Experiments: %EXPERIMENTS_DIR%
+echo Results:     %RESULTS_DIR%
 echo.
 
 REM ============================================================================
@@ -42,7 +45,7 @@ for %%L in (ce dice focal dice_focal tversky) do (
             --img-height 1152 ^
             --img-width 1536 ^
             --test-split-config %SPLITS_CFG% ^
-            --output-dir "%RESULTS_DIR%\loss_study\%%L_seed%%S" ^
+            --output-dir "%EXPERIMENTS_DIR%\loss_study\%%L_seed%%S" ^
             --use-amp
         if %ERRORLEVEL% NEQ 0 echo FAILED: %%L seed=%%S
     )
@@ -72,7 +75,7 @@ for %%H in (768 1152) do (
             --img-height %%H ^
             --img-width !W! ^
             --test-split-config %SPLITS_CFG% ^
-            --output-dir "%RESULTS_DIR%\resolution_study\%%Hx!W!_seed%%S" ^
+            --output-dir "%EXPERIMENTS_DIR%\resolution_study\%%Hx!W!_seed%%S" ^
             --use-amp
         if %ERRORLEVEL% NEQ 0 echo FAILED: %%Hx!W! seed=%%S
     )
@@ -97,5 +100,6 @@ if %ERRORLEVEL% NEQ 0 echo FAILED: classical baseline
 echo.
 echo ============================================================
 echo ALL EXPERIMENTS COMPLETE
-echo Results at: %RESULTS_DIR%
+echo Experiments at: %EXPERIMENTS_DIR%
+echo Results at:     %RESULTS_DIR%
 echo ============================================================
