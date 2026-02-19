@@ -1,4 +1,5 @@
 @echo off
+setlocal enabledelayedexpansion
 REM ============================================================================
 REM Experiment Runner for Whiteboard Segmentation Research Paper
 REM
@@ -14,6 +15,7 @@ REM ============================================================================
 set EXPERIMENTS_DIR=..\SegmentationResearchPaper\experiments
 set RESULTS_DIR=..\SegmentationResearchPaper\results
 set SPLITS_CFG=..\SegmentationResearchPaper\configs\test_splits.json
+set CUBLAS_WORKSPACE_CONFIG=:4096:8
 
 echo ============================================================
 echo WHITEBOARD SEGMENTATION - FULL EXPERIMENT SUITE
@@ -47,7 +49,7 @@ for %%L in (ce dice focal dice_focal tversky) do (
             --test-split-config %SPLITS_CFG% ^
             --output-dir "%EXPERIMENTS_DIR%\loss_study\%%L_seed%%S" ^
             --use-amp
-        if %ERRORLEVEL% NEQ 0 echo FAILED: %%L seed=%%S
+        if !ERRORLEVEL! NEQ 0 echo FAILED: %%L seed=%%S
     )
 )
 
@@ -77,7 +79,7 @@ for %%H in (768 1152) do (
             --test-split-config %SPLITS_CFG% ^
             --output-dir "%EXPERIMENTS_DIR%\resolution_study\%%Hx!W!_seed%%S" ^
             --use-amp
-        if %ERRORLEVEL% NEQ 0 echo FAILED: %%Hx!W! seed=%%S
+        if !ERRORLEVEL! NEQ 0 echo FAILED: %%Hx!W! seed=%%S
     )
 )
 
@@ -95,7 +97,7 @@ python scripts/classical_baseline.py ^
     --output-dir "%RESULTS_DIR%" ^
     --test-split-config %SPLITS_CFG% ^
     --test-split both
-if %ERRORLEVEL% NEQ 0 echo FAILED: classical baseline
+if !ERRORLEVEL! NEQ 0 echo FAILED: classical baseline
 
 echo.
 echo ============================================================

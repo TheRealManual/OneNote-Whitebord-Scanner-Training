@@ -397,9 +397,11 @@ def train_model(args):
     
     # Optionally enable fully deterministic algorithms
     if args.deterministic:
-        torch.use_deterministic_algorithms(True)
-        print("\u26a0\ufe0f  torch.use_deterministic_algorithms(True) enabled")
-        print("   Some operations may raise errors if no deterministic implementation exists.")
+        os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        print("\u26a0\ufe0f  torch.use_deterministic_algorithms(True, warn_only=True) enabled")
+        print("   Non-deterministic ops will warn instead of error.")
+        print(f"   CUBLAS_WORKSPACE_CONFIG={os.environ.get('CUBLAS_WORKSPACE_CONFIG', 'not set')}")
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -466,7 +468,8 @@ def train_model(args):
     train_loader = DataLoader(
         train_dataset, 
         batch_size=args.batch_size, 
-        shuffle=True, 
+        shuffle=True,
+        drop_last=True,  # Avoid single-sample batches that crash BatchNorm
         **loader_kwargs
     )
     val_loader = DataLoader(
@@ -857,7 +860,7 @@ def main():
     parser.add_argument("--seed", type=int, default=None,
                        help="Random seed for reproducibility (sets random, numpy, torch, cudnn)")
     parser.add_argument("--deterministic", action="store_true",
-                       help="Enable torch.use_deterministic_algorithms(True) for strict reproducibility (may error on some ops)")
+                       help="Enable torch.use_deterministic_algorithms(True, warn_only=True) for best-effort reproducibility")
     parser.add_argument("--skip-training", action="store_true",
                        help="Skip training and only export existing model")
     parser.add_argument("--test-split-config", type=str, default=None,
@@ -867,7 +870,7 @@ def main():
     
     # Create output directory
     args.output_dir = Path(args.output_dir)
-    args.output_dir.mkdir(exist_ok=True)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
     
     # Train or load model
     if not args.skip_training:
@@ -879,8 +882,12 @@ def main():
         model.aux_classifier = None
         model.load_state_dict(torch.load(args.output_dir / "whiteboard_seg_best.pt"))
     
-    # Export to ONNX
-    onnx_path = export_onnx(model, args)
+    # Export to ONNX (optional — failure here should not affect exit code)
+    try:
+        onnx_path = export_onnx(model, args)
+    except Exception as e:
+        print(f"Export failed (non-fatal): {e}")
+        onnx_path = None
     
     print("\n" + "="*60)
     print("MODEL TRAINING COMPLETE")
