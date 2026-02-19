@@ -1,5 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
+chcp 65001 >nul
+set PYTHONIOENCODING=utf-8
 REM ============================================================================
 REM Experiment Runner for Whiteboard Segmentation Research Paper
 REM
