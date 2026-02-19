@@ -106,6 +106,45 @@ class FocalLoss(nn.Module):
         return focal_loss.mean()
 
 
+class TverskyLoss(nn.Module):
+    """Tversky Loss — generalizes Dice with separate FP/FN weighting.
+    
+    α controls false-positive penalty, β controls false-negative penalty.
+    α < β penalizes missed strokes more, helpful for thin-structure recall.
+    Default α=0.3, β=0.7 encourages higher recall on thin strokes.
+    When α=β=0.5, this reduces to Dice loss.
+    """
+    def __init__(self, alpha=0.3, beta=0.7, smooth=1.0):
+        super(TverskyLoss, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.smooth = smooth
+    
+    def forward(self, predictions, targets):
+        predictions = F.softmax(predictions, dim=1)
+        pred_stroke = predictions[:, 1, :, :]
+        
+        pred_flat = pred_stroke.contiguous().view(-1)
+        target_flat = targets.contiguous().view(-1).float()
+        
+        tp = (pred_flat * target_flat).sum()
+        fp = (pred_flat * (1 - target_flat)).sum()
+        fn = ((1 - pred_flat) * target_flat).sum()
+        
+        tversky = (tp + self.smooth) / (tp + self.alpha * fp + self.beta * fn + self.smooth)
+        return 1.0 - tversky
+
+
+class CrossEntropyLossWrapper(nn.Module):
+    """Wrapper around PyTorch CrossEntropyLoss for consistent interface."""
+    def __init__(self):
+        super(CrossEntropyLossWrapper, self).__init__()
+        self.ce = nn.CrossEntropyLoss()
+    
+    def forward(self, predictions, targets):
+        return self.ce(predictions, targets)
+
+
 class CombinedLoss(nn.Module):
     """Combination of Dice Loss and Focal Loss for best results"""
     def __init__(self, dice_weight=0.6, focal_weight=0.4, focal_alpha=0.25, focal_gamma=2.0):
@@ -118,6 +157,51 @@ class CombinedLoss(nn.Module):
     def forward(self, predictions, targets):
         return self.dice_weight * self.dice(predictions, targets) + \
                self.focal_weight * self.focal(predictions, targets)
+
+
+LOSS_REGISTRY = {
+    'ce': 'CrossEntropyLoss',
+    'dice': 'DiceLoss',
+    'focal': 'FocalLoss',
+    'dice_focal': 'CombinedLoss (Dice+Focal)',
+    'tversky': 'TverskyLoss',
+}
+
+
+def build_loss(args):
+    """Factory function to build loss criterion from CLI args.
+    
+    Returns:
+        criterion: nn.Module loss function
+        loss_name: str human-readable name for logging
+    """
+    loss_type = args.loss
+    
+    if loss_type == 'ce':
+        criterion = CrossEntropyLossWrapper()
+        loss_name = 'CrossEntropyLoss'
+    elif loss_type == 'dice':
+        criterion = DiceLoss()
+        loss_name = 'DiceLoss'
+    elif loss_type == 'focal':
+        criterion = FocalLoss(alpha=args.focal_alpha, gamma=args.focal_gamma)
+        loss_name = f'FocalLoss(alpha={args.focal_alpha}, gamma={args.focal_gamma})'
+    elif loss_type == 'dice_focal':
+        criterion = CombinedLoss(
+            dice_weight=args.dice_weight,
+            focal_weight=args.focal_weight,
+            focal_alpha=args.focal_alpha,
+            focal_gamma=args.focal_gamma
+        )
+        loss_name = f'CombinedLoss(dice={args.dice_weight}, focal={args.focal_weight})'
+    elif loss_type == 'tversky':
+        criterion = TverskyLoss(alpha=args.tversky_alpha, beta=args.tversky_beta)
+        loss_name = f'TverskyLoss(alpha={args.tversky_alpha}, beta={args.tversky_beta})'
+    else:
+        raise ValueError(f"Unknown loss type: {loss_type}. Choose from: {list(LOSS_REGISTRY.keys())}")
+    
+    print(f"\n📊 Loss function: {loss_name}")
+    return criterion, loss_name
 
 
 class WhiteboardDataset(Dataset):
@@ -343,13 +427,8 @@ def train_model(args):
         print("WARNING: tiny dataset detected; switching to eval()-mode during training")
         model.eval()
     
-    # Use Combined Loss (Dice + Focal) for best accuracy
-    criterion = CombinedLoss(
-        dice_weight=args.dice_weight, 
-        focal_weight=args.focal_weight,
-        focal_alpha=args.focal_alpha,
-        focal_gamma=args.focal_gamma
-    )
+    # Build loss function from CLI args (supports: ce, dice, focal, dice_focal, tversky)
+    criterion, loss_name = build_loss(args)
     
     # Optimizer with weight decay
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -389,11 +468,14 @@ def train_model(args):
             'weight_decay': args.weight_decay,
             
             # Loss Function
-            'loss_function': 'CombinedLoss',
-            'dice_weight': args.dice_weight,
-            'focal_weight': args.focal_weight,
-            'focal_alpha': args.focal_alpha,
-            'focal_gamma': args.focal_gamma,
+            'loss_type': args.loss,
+            'loss_function': loss_name,
+            'dice_weight': args.dice_weight if args.loss in ('dice_focal',) else None,
+            'focal_weight': args.focal_weight if args.loss in ('dice_focal',) else None,
+            'focal_alpha': args.focal_alpha if args.loss in ('focal', 'dice_focal') else None,
+            'focal_gamma': args.focal_gamma if args.loss in ('focal', 'dice_focal') else None,
+            'tversky_alpha': args.tversky_alpha if args.loss == 'tversky' else None,
+            'tversky_beta': args.tversky_beta if args.loss == 'tversky' else None,
             
             # Learning Rate Schedule
             'scheduler': 'CosineAnnealingLR with warmup',
@@ -676,6 +758,9 @@ def main():
                        help="Image height for training")
     parser.add_argument("--img-width", type=int, default=1024,
                        help="Image width for training")
+    parser.add_argument("--loss", type=str, default="dice_focal",
+                       choices=["ce", "dice", "focal", "dice_focal", "tversky"],
+                       help="Loss function for training (default: dice_focal)")
     parser.add_argument("--dice-weight", type=float, default=0.6,
                        help="Weight for Dice loss in combined loss (default: 0.6)")
     parser.add_argument("--focal-weight", type=float, default=0.4,
@@ -684,6 +769,10 @@ def main():
                        help="Focal loss alpha parameter - balance between classes (default: 0.25)")
     parser.add_argument("--focal-gamma", type=float, default=2.0,
                        help="Focal loss gamma parameter - focus on hard examples (default: 2.0)")
+    parser.add_argument("--tversky-alpha", type=float, default=0.3,
+                       help="Tversky loss alpha (FP weight). Default: 0.3")
+    parser.add_argument("--tversky-beta", type=float, default=0.7,
+                       help="Tversky loss beta (FN weight). Default: 0.7")
     parser.add_argument("--warmup-epochs", type=int, default=5,
                        help="Number of warmup epochs")
     parser.add_argument("--patience", type=int, default=15,
