@@ -31,6 +31,13 @@ import argparse
 import json
 from tqdm import tqdm
 
+# Path constants for two-repo workspace setup
+# Public repo (this file's repo): code + scripts
+# Private repo (sibling): paper + results + experiment outputs
+REPO_ROOT = Path(__file__).resolve().parent
+PRIVATE_REPO = REPO_ROOT.parent / "SegmentationResearchPaper"
+DEFAULT_OUTPUT_DIR = str(PRIVATE_REPO / "experiments" / "default")
+
 
 class DiceLoss(nn.Module):
     """Dice Loss for binary segmentation - better than CrossEntropy for imbalanced data"""
@@ -603,8 +610,8 @@ def main():
     parser = argparse.ArgumentParser(description="Train whiteboard segmentation model")
     parser.add_argument("--data-dir", type=str, default="dataset",
                        help="Path to dataset directory")
-    parser.add_argument("--output-dir", type=str, default="models",
-                       help="Output directory for trained models")
+    parser.add_argument("--output-dir", type=str, default=DEFAULT_OUTPUT_DIR,
+                       help="Output directory for trained models (default: ../SegmentationResearchPaper/experiments/default)")
     parser.add_argument("--epochs", type=int, default=100,
                        help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=2,

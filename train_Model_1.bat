@@ -16,7 +16,7 @@ echo    --img-height 2784
 echo    --img-width 3712 
 echo    --patience 15 
 echo    --use-amp 
-echo    --model-dir models_1
+echo    --model-dir ..\SegmentationResearchPaper\experiments\model_1
 echo .
 pause
 
@@ -33,13 +33,13 @@ python train_segmentation.py ^
     --img-width 3712 ^
     --patience 15 ^
     --use-amp ^
-    --output-dir models_1
+    --output-dir ..\SegmentationResearchPaper\experiments\model_1
 
 echo.
 echo ============================================================
 echo OPTIMIZED TRAINING COMPLETE
 echo ============================================================
 echo.
-echo Results saved to: models_1\training_history.json
+echo Results saved to: ..\SegmentationResearchPaper\experiments\model_1\training_history.json
 echo Compare with models_1\training_history.json to see improvements!
 pause

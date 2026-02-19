@@ -3,12 +3,34 @@
 # dataset/images/*.png
 # dataset/masks/*.png
 
-Research-Paper/*
+# ============================================================
+# Research Paper - all paper/experiment artifacts go to the
+# private SegmentationResearchPaper repo (sibling directory).
+# These rules prevent accidental commits to this public repo.
+# ============================================================
 
-# Trained models
-models/*.pt
-models/*.onnx
-models/training_history.json
+# Legacy Research-Paper folder (moved to private repo)
+Research-Paper/
+
+# Experiment outputs
+experiments/
+results/
+figures/
+
+# Model checkpoints (anywhere in repo)
+*.pt
+*.pts
+*.onnx
+
+# Exception: keep committed production model in models_1/
+!models_1/**
+
+# Training logs
+training_history.json
+comparison_summary.json
+
+# Private repo (if cloned as subfolder by mistake)
+SegmentationResearchPaper/
 
 # Python
 __pycache__/

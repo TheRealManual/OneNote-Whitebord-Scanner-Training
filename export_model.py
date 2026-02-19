@@ -89,8 +89,21 @@ def export_to_torchscript(model_path, output_path, num_classes=2):
 
 
 if __name__ == "__main__":
-    # Export model 2 (the 2560x2560 trained model)
-    model_dir = Path(__file__).parent / "models_1"
+    import argparse
+    
+    # Path constants for two-repo workspace setup
+    REPO_ROOT = Path(__file__).resolve().parent
+    PRIVATE_REPO = REPO_ROOT.parent / "SegmentationResearchPaper"
+    DEFAULT_MODEL_DIR = str(PRIVATE_REPO / "experiments" / "default")
+    
+    parser = argparse.ArgumentParser(description="Export trained model to TorchScript")
+    parser.add_argument("--model-dir", type=str, default=DEFAULT_MODEL_DIR,
+                       help="Directory containing trained model (default: ../SegmentationResearchPaper/experiments/default)")
+    parser.add_argument("--num-classes", type=int, default=2,
+                       help="Number of output classes (default: 2)")
+    args = parser.parse_args()
+    
+    model_dir = Path(args.model_dir)
     
     # Try best model first, then final model
     if (model_dir / "whiteboard_seg_best.pt").exists():
@@ -100,11 +113,11 @@ if __name__ == "__main__":
         model_path = model_dir / "whiteboard_seg_final.pt"
         print("Using FINAL model (last epoch)")
     else:
-        raise FileNotFoundError("No trained model found in models_1! Train a model first.")
+        raise FileNotFoundError(f"No trained model found in {model_dir}! Train a model first.")
     
     output_path = model_dir / "whiteboard_seg.pts"
     
-    export_to_torchscript(model_path, output_path, num_classes=2)
+    export_to_torchscript(model_path, output_path, num_classes=args.num_classes)
     
     print(f"\n📦 Ready for deployment!")
     print(f"Copy this file to the scanner's models folder:")

@@ -41,14 +41,19 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
+import argparse
 
 # Setup paths
 SCRIPT_DIR = Path(__file__).parent
+REPO_ROOT = SCRIPT_DIR.parent
+PRIVATE_REPO = REPO_ROOT.parent / "SegmentationResearchPaper"
+
 MODEL_1_DIR = SCRIPT_DIR / "model_1"
 MODEL_2_DIR = SCRIPT_DIR / "model_2"
 IMAGES_DIR = SCRIPT_DIR / "images"
 MASKS_DIR = SCRIPT_DIR / "masks"
-OUTPUT_DIR = SCRIPT_DIR / "output"
+DEFAULT_OUTPUT_DIR = PRIVATE_REPO / "results" / "comparisons"
+OUTPUT_DIR = DEFAULT_OUTPUT_DIR  # Will be overridden by CLI args in main()
 
 print("=" * 80)
 print("MODEL COMPARISON TOOL")
@@ -981,30 +986,50 @@ def create_aggregate_comparison(all_results_1, all_results_2, config1, config2, 
 
 def main():
     """Run comprehensive model comparison"""
+    global OUTPUT_DIR
     
-    OUTPUT_DIR.mkdir(exist_ok=True)
+    parser = argparse.ArgumentParser(description="Compare two segmentation models")
+    parser.add_argument("--output-dir", type=str, default=str(DEFAULT_OUTPUT_DIR),
+                       help="Output directory for comparison results (default: ../SegmentationResearchPaper/results/comparisons)")
+    parser.add_argument("--model-1-dir", type=str, default=str(MODEL_1_DIR),
+                       help="Path to model 1 directory")
+    parser.add_argument("--model-2-dir", type=str, default=str(MODEL_2_DIR),
+                       help="Path to model 2 directory")
+    parser.add_argument("--images-dir", type=str, default=str(IMAGES_DIR),
+                       help="Path to test images directory")
+    parser.add_argument("--masks-dir", type=str, default=str(MASKS_DIR),
+                       help="Path to ground truth masks directory")
+    args = parser.parse_args()
+    
+    OUTPUT_DIR = Path(args.output_dir)
+    model_1_dir = Path(args.model_1_dir)
+    model_2_dir = Path(args.model_2_dir)
+    images_dir = Path(args.images_dir)
+    masks_dir = Path(args.masks_dir)
+    
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
     # Load models and configs
     print("Loading models...")
     try:
-        model1, config1 = load_model_and_config(MODEL_1_DIR)
+        model1, config1 = load_model_and_config(model_1_dir)
         print("✓ Model 1 loaded\n")
     except Exception as e:
         print(f"❌ Failed to load Model 1: {e}")
         return
     
     try:
-        model2, config2 = load_model_and_config(MODEL_2_DIR)
+        model2, config2 = load_model_and_config(model_2_dir)
         print("✓ Model 2 loaded\n")
     except Exception as e:
         print(f"❌ Failed to load Model 2: {e}")
         return
     
     # Get test images
-    image_files = list(IMAGES_DIR.glob("*.jpg")) + list(IMAGES_DIR.glob("*.png"))
+    image_files = list(images_dir.glob("*.jpg")) + list(images_dir.glob("*.png"))
     
     if len(image_files) == 0:
-        print(f"❌ No test images found in {IMAGES_DIR}")
+        print(f"❌ No test images found in {images_dir}")
         print("Please add test images to compare_models/images/")
         return
     
@@ -1020,7 +1045,7 @@ def main():
         print("=" * 80)
         
         # Load ground truth
-        mask_path = MASKS_DIR / f"{img_path.stem}.png"
+        mask_path = masks_dir / f"{img_path.stem}.png"
         if not mask_path.exists():
             print(f"⚠️  No mask found: {mask_path.name}, skipping...")
             continue

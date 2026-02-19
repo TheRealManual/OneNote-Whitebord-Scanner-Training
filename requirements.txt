@@ -5,6 +5,10 @@ numpy>=1.22.0
 flask>=3.0.0
 flask-cors>=4.0.0
 onnxruntime>=1.16.0
+opencv-python>=4.5.0
+tqdm>=4.60.0
+matplotlib>=3.5.0
+scipy>=1.7.0
 
 # Optional dependencies
 # onnx>=1.15.0  # May fail on Windows due to path limits - install manually if needed

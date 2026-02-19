@@ -36,8 +36,9 @@ training_state = {
 
 # Paths
 BASE_DIR = Path(__file__).parent
+PRIVATE_REPO = BASE_DIR.parent / 'SegmentationResearchPaper'
 DATASET_DIR = BASE_DIR / 'dataset'
-MODELS_DIR = BASE_DIR / 'models'
+MODELS_DIR = PRIVATE_REPO / 'experiments' / 'default'
 TRAINING_HISTORY_FILE = MODELS_DIR / 'training_history.json'
 
 # Ensure directories exist
