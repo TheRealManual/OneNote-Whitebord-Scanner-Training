@@ -216,4 +216,115 @@ with open(SNIPPETS / "statistical_significance.tex", "w") as f:
     f.write("\\end{tabular}\n")
 
 print("Wrote statistical_significance.tex")
+
+
+# ── 6. Robustness table (median, IQR, min, paired wins) ───
+# Aggregate per-image, seed-averaged F1 for each loss
+loss_per_image_f1 = defaultdict(lambda: defaultdict(list))
+for name, r in models.items():
+    if "error" in r or not name.startswith("loss_study/"):
+        continue
+    loss = r["config"]["loss_type"]
+    for item in r["results"]["per_image"]:
+        img = item["image"]
+        loss_per_image_f1[loss][img].append(item["metrics"]["f1"])
+
+# Baseline per-image
+baseline_pi = baseline["adaptive"]["per_image"]
+bl_f1 = {item["image"]: item["metrics"]["f1"] for item in baseline_pi}
+
+with open(SNIPPETS / "robustness.tex", "w") as f:
+    f.write("\\begin{tabular}{l"
+            " S[table-format=1.3]"
+            " S[table-format=1.3]"
+            " S[table-format=1.3]"
+            " S[table-format=1.3]"
+            " S[table-format=1.3]"
+            " r"
+            "}\n")
+    f.write("\\toprule\n")
+    f.write("Method & {Mean} & {Median} & {IQR} & {Min} & {Max} & {Wins/12} \\\\\n")
+    f.write("\\midrule\n")
+    # Deep models
+    for loss in LOSS_ORDER:
+        dd = loss_per_image_f1[loss]
+        img_f1s = np.array([np.mean(dd[img]) for img in sorted(dd.keys())])
+        q25, q75 = np.percentile(img_f1s, 25), np.percentile(img_f1s, 75)
+        # Paired wins vs CE (for Dice-family) or vs Dice (for CE/Focal)
+        # Use wins vs adaptive baseline
+        wins = sum(1 for img in sorted(dd.keys())
+                   if np.mean(dd[img]) > bl_f1.get(img, 999))
+        f.write(f"{LOSS_DISPLAY[loss]} & {img_f1s.mean():.3f}"
+                f" & {np.median(img_f1s):.3f}"
+                f" & {q75-q25:.3f}"
+                f" & {img_f1s.min():.3f}"
+                f" & {img_f1s.max():.3f}"
+                f" & {wins}/12 \\\\\n")
+    # Baseline
+    bl_arr = np.array(list(bl_f1.values()))
+    q25, q75 = np.percentile(bl_arr, 25), np.percentile(bl_arr, 75)
+    f.write("\\midrule\n")
+    f.write(f"Adaptive & {bl_arr.mean():.3f}"
+            f" & {np.median(bl_arr):.3f}"
+            f" & {q75-q25:.3f}"
+            f" & {bl_arr.min():.3f}"
+            f" & {bl_arr.max():.3f}"
+            f" & 12/12 \\\\\n")
+    f.write("\\bottomrule\n")
+    f.write("\\end{tabular}\n")
+
+print("Wrote robustness.tex")
+
+
+# ── 7. Enhanced stats table with effect sizes ──────────────
+with open(SNIPPETS / "statistical_significance.tex", "w") as f:
+    f.write("\\begin{tabular}{l"
+            " S[table-format=+1.4]"
+            " S[table-format=+1.4]"
+            " S[table-format=1.4]"
+            " l"
+            "}\n")
+    f.write("\\toprule\n")
+    f.write("Comparison & {$\\Delta$F1 (mean)} & {$\\Delta$F1 (median)}"
+            " & {$p$ (Wilcoxon)} & {Sig.} \\\\\n")
+    f.write("\\midrule\n")
+
+    key_pairs = [
+        ("ce", "dice", "CE vs.~Dice"),
+        ("ce", "tversky", "CE vs.~Tversky"),
+        ("focal", "dice_focal", "Focal vs.~Dice+Focal"),
+        ("dice", "dice_focal", "Dice vs.~Dice+Focal"),
+        ("dice", "tversky", "Dice vs.~Tversky"),
+        ("dice_focal", "tversky", "Dice+Focal vs.~Tversky"),
+    ]
+    f1_tests = stats["f1"]
+    for a, b, label in key_pairs:
+        key = f"{a}_vs_{b}"
+        if key not in f1_tests:
+            key = f"{b}_vs_{a}"
+        t = f1_tests[key]
+        mean_delta = t["mean_diff"]
+        wp = t["wilcoxon_pvalue"]
+        # Compute median paired diff from per-image data (same sign as mean_diff: a - b)
+        diffs = []
+        for img in sorted(loss_per_image_f1[a].keys()):
+            va = np.mean(loss_per_image_f1[a][img])
+            vb = np.mean(loss_per_image_f1[b][img])
+            diffs.append(va - vb)  # same convention as mean_diff
+        median_delta = np.median(diffs)
+        if wp < 0.001:
+            sig = "***"
+        elif wp < 0.005:
+            sig = "**"
+        elif wp < 0.05:
+            sig = "*"
+        else:
+            sig = "n.s."
+        f.write(f"{label} & {mean_delta:+.4f} & {median_delta:+.4f}"
+                f" & {wp:.4f} & {sig} \\\\\n")
+
+    f.write("\\bottomrule\n")
+    f.write("\\end{tabular}\n")
+
+print("Wrote statistical_significance.tex (enhanced with effect sizes)")
 print("\nAll snippets generated.")
