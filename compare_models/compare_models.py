@@ -69,6 +69,64 @@ if __name__ == "__main__":
 # UTILITY FUNCTIONS
 # ============================================================================
 
+def boundary_iou(pred_mask, gt_mask, dilation_ratio=0.02):
+    """Compute Boundary IoU between predicted and ground-truth masks.
+
+    Boundary IoU restricts IoU computation to a narrow band around object
+    boundaries, making it sensitive to boundary quality.
+
+    Uses distance transforms instead of morphological erosion for O(n)
+    performance regardless of band width.
+
+    Reference: Cheng et al., "Boundary IoU: Improving Object-Centric Image
+    Segmentation Evaluation", CVPR 2021.
+
+    Args:
+        pred_mask: uint8 array (H, W), values 0-255.
+        gt_mask:   uint8 array (H, W), values 0-255.
+        dilation_ratio: ratio of image diagonal used as boundary band width.
+                        Default 0.02 (2% of diagonal).
+
+    Returns:
+        float Boundary IoU in [0, 1].
+    """
+    pred_binary = (pred_mask > 127).astype(np.uint8)
+    gt_binary = (gt_mask > 127).astype(np.uint8)
+
+    H, W = pred_binary.shape[:2]
+    diag = np.sqrt(H**2 + W**2)
+    dilation_px = max(1, int(round(dilation_ratio * diag)))
+
+    # Use distance transform (O(n)) instead of morphological erosion (O(n*k²))
+    # Distance transform gives distance from each foreground pixel to nearest
+    # background pixel. Boundary band = foreground pixels within dilation_px
+    # of the edge (i.e. distance <= dilation_px).
+    pred_dist = cv2.distanceTransform(pred_binary, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+    gt_dist = cv2.distanceTransform(gt_binary, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+
+    # Boundary band = foreground pixels where distance to edge <= dilation_px
+    pred_boundary_band = ((pred_binary == 1) & (pred_dist <= dilation_px)).astype(np.uint8)
+    gt_boundary_band = ((gt_binary == 1) & (gt_dist <= dilation_px)).astype(np.uint8)
+
+    # Union of boundary bands
+    boundary_region = ((pred_boundary_band + gt_boundary_band) > 0).astype(np.uint8)
+
+    if boundary_region.sum() == 0:
+        # Both masks are empty or have no boundary
+        if pred_binary.sum() == 0 and gt_binary.sum() == 0:
+            return 1.0
+        return 0.0
+
+    # Restrict pred and gt to boundary region
+    pred_in_band = pred_binary * boundary_region
+    gt_in_band = gt_binary * boundary_region
+
+    intersection = np.logical_and(pred_in_band, gt_in_band).sum()
+    union = np.logical_or(pred_in_band, gt_in_band).sum()
+
+    return float(intersection / union) if union > 0 else 0.0
+
+
 def boundary_f1(pred_mask, gt_mask, tolerance=None):
     """Compute Boundary F1 (BF1) score between predicted and ground-truth masks.
 
@@ -153,6 +211,9 @@ def calculate_metrics(pred_mask, gt_mask):
     # Boundary F1 (morphological gradient, resolution-scaled tolerance)
     bf1 = boundary_f1(pred_mask, gt_mask)
     
+    # Boundary IoU (Cheng et al. CVPR 2021, 2% diagonal band)
+    b_iou = boundary_iou(pred_mask, gt_mask)
+    
     return {
         'iou': float(iou),
         'f1': float(f1),
@@ -162,6 +223,7 @@ def calculate_metrics(pred_mask, gt_mask):
         'dice': float(dice),
         'edge_iou': float(edge_iou),
         'boundary_f1': float(bf1),
+        'boundary_iou': float(b_iou),
         'tp': int(tp),
         'fp': int(fp),
         'fn': int(fn),

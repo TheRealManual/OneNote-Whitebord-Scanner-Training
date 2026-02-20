@@ -102,7 +102,7 @@ def extract_loss_study_metrics(data):
         grouped = model_data["results"]["grouped"]
         for group_name in ["overall", "core", "thin"]:
             g = grouped.get(group_name, {})
-            for metric in ["f1", "iou", "boundary_f1"]:
+            for metric in ["f1", "iou", "boundary_f1", "boundary_iou"]:
                 if metric in g:
                     key = f"{group_name}_{metric}"
                     results[loss_label][key]["seeds"].append(g[metric]["mean"])
@@ -142,7 +142,7 @@ def extract_resolution_metrics(data):
         grouped = model_data["results"]["grouped"]
         for group_name in ["overall", "core", "thin"]:
             g = grouped.get(group_name, {})
-            for metric in ["f1", "iou", "boundary_f1"]:
+            for metric in ["f1", "iou", "boundary_f1", "boundary_iou"]:
                 if metric in g:
                     key = f"{group_name}_{metric}"
                     results[res_label][key]["seeds"].append(g[metric]["mean"])
@@ -167,17 +167,26 @@ def plot_loss_study_bars(loss_metrics, output_dir):
     metrics = ["overall_f1", "overall_iou", "overall_boundary_f1"]
     metric_labels = ["F1", "IoU", "Boundary F1"]
     metric_colors = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+
+    # Add Boundary IoU if available
+    sample_loss = next(iter(loss_metrics.values()), {})
+    if "overall_boundary_iou" in sample_loss:
+        metrics.append("overall_boundary_iou")
+        metric_labels.append("Boundary IoU")
+        metric_colors.append("#9467bd")
+
     losses = [l for l in LOSS_ORDER if l in loss_metrics]
 
     x = np.arange(len(losses))
-    width = 0.25
-    offsets = [-width, 0, width]
+    n_metrics = len(metrics)
+    width = 0.8 / n_metrics
+    offsets = [(i - (n_metrics - 1) / 2) * width for i in range(n_metrics)]
 
     fig, ax = plt.subplots(figsize=(10, 5.5))
 
     for i, (metric, label, color) in enumerate(zip(metrics, metric_labels, metric_colors)):
-        means = [loss_metrics[l][metric]["mean"] for l in losses]
-        stds = [loss_metrics[l][metric]["std"] for l in losses]
+        means = [loss_metrics[l].get(metric, {}).get("mean", 0) for l in losses]
+        stds = [loss_metrics[l].get(metric, {}).get("std", 0) for l in losses]
 
         ax.bar(x + offsets[i], means, width, yerr=stds,
                label=label, capsize=4, alpha=0.85,
@@ -417,18 +426,22 @@ def plot_metric_heatmap(loss_metrics, output_dir):
         ("overall_f1", "F1"),
         ("overall_iou", "IoU"),
         ("overall_boundary_f1", "BF1"),
+        ("overall_boundary_iou", "B-IoU"),
         ("core_f1", "Core F1"),
         ("thin_f1", "Thin F1"),
     ]
+    # Only include metrics that exist in the data
+    metrics = [(k, l) for k, l in metrics
+               if any(k in loss_metrics.get(loss, {}) for loss in losses)]
     metric_keys = [m[0] for m in metrics]
     metric_labels = [m[1] for m in metrics]
 
     data_matrix = np.zeros((len(losses), len(metrics)))
     for i, l in enumerate(losses):
         for j, mk in enumerate(metric_keys):
-            data_matrix[i, j] = loss_metrics[l][mk]["mean"]
+            data_matrix[i, j] = loss_metrics[l].get(mk, {}).get("mean", 0)
 
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig, ax = plt.subplots(figsize=(9, 4.5))
     im = ax.imshow(data_matrix, cmap="YlOrRd", aspect="auto", vmin=0.25, vmax=0.75)
 
     ax.set_xticks(np.arange(len(metric_labels)))

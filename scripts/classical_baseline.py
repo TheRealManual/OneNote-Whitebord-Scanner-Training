@@ -78,16 +78,17 @@ def morphological_cleanup(mask, kernel_size=2):
 
 
 def run_baseline(images_dir, masks_dir, method, img_height=768, img_width=1024,
-                 test_split_config=None, test_split=None):
+                 test_split_config=None, test_split=None, original_resolution=False):
     """Run a classical baseline on a set of images.
 
     Args:
         images_dir: Path to images directory.
         masks_dir: Path to ground-truth masks directory.
         method: 'adaptive' or 'otsu'.
-        img_height, img_width: Resolution for evaluation.
+        img_height, img_width: Resolution for evaluation (ignored if original_resolution=True).
         test_split_config: Optional path to test_splits.json.
         test_split: 'core', 'thin', or 'both' — filter images by group.
+        original_resolution: If True, evaluate at original image resolution.
 
     Returns:
         dict with method name, per-image results, and aggregated metrics.
@@ -128,13 +129,19 @@ def run_baseline(images_dir, masks_dir, method, img_height=768, img_width=1024,
         if not mask_path.exists():
             continue
 
-        # Load and resize
+        # Load and optionally resize
         img = cv2.imread(str(img_path))
-        img_resized = cv2.resize(img, (img_width, img_height))
-        gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
-
         gt_mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-        gt_resized = cv2.resize(gt_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
+
+        if original_resolution:
+            # Evaluate at native image resolution
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gt_eval = gt_mask
+        else:
+            # Resize to fixed resolution
+            img_resized = cv2.resize(img, (img_width, img_height))
+            gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+            gt_eval = cv2.resize(gt_mask, (img_width, img_height), interpolation=cv2.INTER_NEAREST)
 
         # Apply thresholding
         if method == 'adaptive':
@@ -148,7 +155,7 @@ def run_baseline(images_dir, masks_dir, method, img_height=768, img_width=1024,
         pred_mask = morphological_cleanup(pred_mask)
 
         # Calculate metrics
-        metrics = calculate_metrics(pred_mask, gt_resized)
+        metrics = calculate_metrics(pred_mask, gt_eval)
         per_image.append({
             'image': img_path.name,
             'metrics': metrics,
@@ -157,7 +164,7 @@ def run_baseline(images_dir, masks_dir, method, img_height=768, img_width=1024,
     # Aggregate
     if per_image:
         metric_keys = ['iou', 'f1', 'precision', 'recall', 'pixel_acc', 'dice',
-                        'edge_iou', 'boundary_f1']
+                        'edge_iou', 'boundary_f1', 'boundary_iou']
         aggregate = {}
         for k in metric_keys:
             values = [r['metrics'][k] for r in per_image if k in r['metrics']]
@@ -194,6 +201,8 @@ def main():
                        help="Image height for evaluation")
     parser.add_argument("--img-width", type=int, default=1024,
                        help="Image width for evaluation")
+    parser.add_argument("--original-resolution", action="store_true",
+                       help="Evaluate at original image resolution (matches deep model eval)")
     parser.add_argument("--test-split-config", type=str, default=None,
                        help="Path to test_splits.json for grouped evaluation")
     parser.add_argument("--test-split", type=str, default=None,
@@ -213,6 +222,7 @@ def main():
             img_height=args.img_height, img_width=args.img_width,
             test_split_config=args.test_split_config,
             test_split=args.test_split,
+            original_resolution=args.original_resolution,
         )
         all_results[method] = result
 

@@ -37,7 +37,7 @@ PRIVATE_REPO = REPO_ROOT.parent / "SegmentationResearchPaper"
 
 # Reuse boundary_f1 and calculate_metrics from compare_models
 sys.path.insert(0, str(REPO_ROOT / "compare_models"))
-from compare_models import calculate_metrics, boundary_f1
+from compare_models import calculate_metrics, boundary_f1, boundary_iou
 
 
 def load_model(model_dir):
@@ -167,7 +167,7 @@ def evaluate_model_on_test_set(model, config, test_images, device="cpu"):
         if not results:
             return {}
         keys = ["iou", "f1", "precision", "recall", "pixel_acc", "dice",
-                "edge_iou", "boundary_f1"]
+                "edge_iou", "boundary_f1", "boundary_iou"]
         agg = {"count": len(results)}
         for k in keys:
             vals = [r["metrics"][k] for r in results if k in r["metrics"]]
@@ -213,6 +213,8 @@ def main():
                         help="Output directory for results")
     parser.add_argument("--device", type=str, default=None,
                         help="Device (cuda or cpu). Auto-detects if not set.")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume from existing results file, skipping already-evaluated models")
     args = parser.parse_args()
 
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
@@ -236,8 +238,23 @@ def main():
     all_results = {}
     total = len(models_info)
 
+    # Resume: load existing results and skip already-evaluated models
+    output_path = output_dir / "test_set_evaluation.json"
+    if args.resume and output_path.exists():
+        with open(output_path) as f:
+            existing = json.load(f)
+        all_results = {k: v for k, v in existing.get("models", {}).items()
+                       if "error" not in v}
+        print(f"Resuming: loaded {len(all_results)} existing results, "
+              f"will evaluate {total - len(all_results)} remaining\n")
+
     for i, minfo in enumerate(models_info):
         name = minfo["name"]
+
+        if name in all_results:
+            print(f"[{i+1}/{total}] Skipping (already evaluated): {name}")
+            continue
+
         print("=" * 70)
         print(f"[{i+1}/{total}] Evaluating: {name}")
         print("=" * 70)
