@@ -111,7 +111,8 @@ def run_baseline(images_dir, masks_dir, method, img_height=768, img_width=1024,
         for p in image_files:
             m = re.match(r'^(image_\d+)', p.stem)
             base_id = m.group(1) if m else p.stem
-            if base_id in allowed_ids:
+            # Only use original images (exact match), not augmented variants
+            if base_id in allowed_ids and p.stem == base_id:
                 filtered.append(p)
         image_files = filtered
 

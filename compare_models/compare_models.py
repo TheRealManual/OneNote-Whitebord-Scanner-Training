@@ -55,13 +55,14 @@ MASKS_DIR = SCRIPT_DIR / "masks"
 DEFAULT_OUTPUT_DIR = PRIVATE_REPO / "results" / "comparisons"
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR  # Will be overridden by CLI args in main()
 
-print("=" * 80)
-print("MODEL COMPARISON TOOL")
-print("=" * 80)
-print(f"Model 1: {MODEL_1_DIR}")
-print(f"Model 2: {MODEL_2_DIR}")
-print(f"Output:  {OUTPUT_DIR}")
-print()
+if __name__ == "__main__":
+    print("=" * 80)
+    print("MODEL COMPARISON TOOL")
+    print("=" * 80)
+    print(f"Model 1: {MODEL_1_DIR}")
+    print(f"Model 2: {MODEL_2_DIR}")
+    print(f"Output:  {OUTPUT_DIR}")
+    print()
 
 
 # ============================================================================
