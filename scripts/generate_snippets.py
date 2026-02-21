@@ -165,7 +165,9 @@ with open(SNIPPETS / "classical_baseline.tex", "w") as f:
     f.write("Method & \\multicolumn{2}{c}{F1} & \\multicolumn{2}{c}{IoU}"
             " & \\multicolumn{2}{c}{BF1} & \\multicolumn{2}{c}{B-IoU} \\\\\n")
     f.write("\\midrule\n")
-    for method in ["adaptive", "otsu"]:
+    for method in ["adaptive", "otsu", "sauvola"]:
+        if method not in baseline:
+            continue
         r = baseline[method]["results"]
         label = method.capitalize()
         row = [label]
@@ -235,8 +237,19 @@ for name, r in models.items():
         loss_per_image_f1[loss][img].append(item["metrics"]["f1"])
 
 # Baseline per-image (normalise keys: strip .png to match deep model keys)
-baseline_pi = baseline["adaptive"]["per_image"]
+# Use Sauvola (strongest classical baseline) for paired comparisons
+if "sauvola" in baseline:
+    bl_method = "sauvola"
+    bl_label = "Sauvola"
+else:
+    bl_method = "adaptive"
+    bl_label = "Adaptive"
+baseline_pi = baseline[bl_method]["per_image"]
 bl_f1 = {item["image"].replace(".png", ""): item["metrics"]["f1"] for item in baseline_pi}
+
+# Also get adaptive per-image for separate row
+adap_pi = baseline["adaptive"]["per_image"]
+adap_f1 = {item["image"].replace(".png", ""): item["metrics"]["f1"] for item in adap_pi}
 
 with open(SNIPPETS / "robustness.tex", "w") as f:
     f.write("\\begin{tabular}{l"
@@ -256,7 +269,7 @@ with open(SNIPPETS / "robustness.tex", "w") as f:
         img_f1s = np.array([np.mean(dd[img]) for img in sorted(dd.keys())])
         q25, q75 = np.percentile(img_f1s, 25), np.percentile(img_f1s, 75)
         # Paired wins vs CE (for Dice-family) or vs Dice (for CE/Focal)
-        # Use wins vs adaptive baseline
+        # Use wins vs strongest classical baseline (Sauvola if available)
         wins = sum(1 for img in sorted(dd.keys())
                    if np.mean(dd[img]) > bl_f1.get(img, 999))
         f.write(f"{LOSS_DISPLAY[loss]} & {img_f1s.mean():.3f}"
@@ -265,9 +278,7 @@ with open(SNIPPETS / "robustness.tex", "w") as f:
                 f" & {img_f1s.min():.3f}"
                 f" & {img_f1s.max():.3f}"
                 f" & {wins}/12 \\\\\n")
-    # Baseline — count images where adaptive beats the best deep model (Tversky)
-    bl_arr = np.array(list(bl_f1.values()))
-    q25, q75 = np.percentile(bl_arr, 25), np.percentile(bl_arr, 75)
+    # Baseline — count images where baseline beats the best deep model (Tversky)
     # Find best deep model per image (across all losses)
     best_deep = {}
     for loss in LOSS_ORDER:
@@ -275,14 +286,33 @@ with open(SNIPPETS / "robustness.tex", "w") as f:
         for img in dd:
             avg = np.mean(dd[img])
             best_deep[img] = max(best_deep.get(img, -1), avg)
-    bl_wins = sum(1 for img in bl_f1 if bl_f1[img] > best_deep.get(img, 999))
+
     f.write("\\midrule\n")
-    f.write(f"Adaptive & {bl_arr.mean():.3f}"
-            f" & {np.median(bl_arr):.3f}"
-            f" & {q75-q25:.3f}"
-            f" & {bl_arr.min():.3f}"
-            f" & {bl_arr.max():.3f}"
-            f" & {bl_wins}/12 \\\\\n")
+
+    # Sauvola row (if available)
+    if "sauvola" in baseline:
+        sauv_pi = baseline["sauvola"]["per_image"]
+        sauv_f1 = {item["image"].replace(".png", ""): item["metrics"]["f1"] for item in sauv_pi}
+        sauv_arr = np.array(list(sauv_f1.values()))
+        sq25, sq75 = np.percentile(sauv_arr, 25), np.percentile(sauv_arr, 75)
+        sauv_wins = sum(1 for img in sauv_f1 if sauv_f1[img] > best_deep.get(img, 999))
+        f.write(f"Sauvola & {sauv_arr.mean():.3f}"
+                f" & {np.median(sauv_arr):.3f}"
+                f" & {sq75-sq25:.3f}"
+                f" & {sauv_arr.min():.3f}"
+                f" & {sauv_arr.max():.3f}"
+                f" & {sauv_wins}/12 \\\\\n")
+
+    # Adaptive row
+    adap_arr = np.array(list(adap_f1.values()))
+    aq25, aq75 = np.percentile(adap_arr, 25), np.percentile(adap_arr, 75)
+    adap_wins = sum(1 for img in adap_f1 if adap_f1[img] > best_deep.get(img, 999))
+    f.write(f"Adaptive & {adap_arr.mean():.3f}"
+            f" & {np.median(adap_arr):.3f}"
+            f" & {aq75-aq25:.3f}"
+            f" & {adap_arr.min():.3f}"
+            f" & {adap_arr.max():.3f}"
+            f" & {adap_wins}/12 \\\\\n")
     f.write("\\bottomrule\n")
     f.write("\\end{tabular}\n")
 

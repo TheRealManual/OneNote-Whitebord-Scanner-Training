@@ -4,8 +4,9 @@ Classical Baseline for Whiteboard Segmentation
 Non-learning baselines to establish a lower-bound reference:
   1. Adaptive thresholding (Gaussian, blockSize=51, C=15)
   2. Otsu thresholding (global automatic threshold)
+  3. Sauvola thresholding (local, window_size=51, k=0.2)
 
-Both include morphological opening cleanup (2×2 kernel).
+All include morphological opening cleanup (2×2 kernel).
 
 Usage:
     python scripts/classical_baseline.py --images-dir dataset/images --masks-dir dataset/masks
@@ -21,6 +22,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from skimage.filters import threshold_sauvola
 
 # Project paths
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -59,6 +61,27 @@ def otsu_threshold(image_gray):
         Binary mask (uint8, 0 or 255), strokes = 255.
     """
     _, mask = cv2.threshold(image_gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    return mask
+
+
+def sauvola_threshold(image_gray, window_size=51, k=0.2):
+    """Apply Sauvola local thresholding.
+
+    Sauvola's method computes a per-pixel threshold:
+        T(x,y) = mean(x,y) * (1 + k * (std(x,y) / R - 1))
+    where R = max(std) = 128 for uint8 images.
+
+    Args:
+        image_gray: uint8 grayscale image.
+        window_size: Size of the local window (must be odd).
+        k: Sauvola sensitivity parameter (default 0.2).
+
+    Returns:
+        Binary mask (uint8, 0 or 255), strokes = 255.
+    """
+    thresh_map = threshold_sauvola(image_gray, window_size=window_size, k=k)
+    # Pixels darker than threshold are strokes
+    mask = ((image_gray < thresh_map) * 255).astype(np.uint8)
     return mask
 
 
@@ -148,6 +171,8 @@ def run_baseline(images_dir, masks_dir, method, img_height=768, img_width=1024,
             pred_mask = adaptive_threshold(gray)
         elif method == 'otsu':
             pred_mask = otsu_threshold(gray)
+        elif method == 'sauvola':
+            pred_mask = sauvola_threshold(gray)
         else:
             raise ValueError(f"Unknown method: {method}")
 
@@ -215,7 +240,7 @@ def main():
 
     all_results = {}
 
-    for method in ('adaptive', 'otsu'):
+    for method in ('adaptive', 'otsu', 'sauvola'):
         print(f"\nRunning {method} thresholding baseline...")
         result = run_baseline(
             args.images_dir, args.masks_dir, method,

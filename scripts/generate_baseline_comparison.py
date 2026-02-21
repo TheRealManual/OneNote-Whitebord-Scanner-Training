@@ -20,6 +20,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
+from skimage.filters import threshold_sauvola
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PRIVATE_REPO = REPO_ROOT.parent / "SegmentationResearchPaper"
@@ -52,6 +53,13 @@ def adaptive_threshold(image_gray, block_size=51, C=15):
         image_gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV, block_size, C
     )
+    return mask
+
+
+def sauvola_threshold_img(image_gray, window_size=51, k=0.2):
+    """Sauvola local thresholding (matches classical_baseline.py)."""
+    thresh_map = threshold_sauvola(image_gray, window_size=window_size, k=k)
+    mask = ((image_gray < thresh_map) * 255).astype(np.uint8)
     return mask
 
 
@@ -174,8 +182,8 @@ def generate_failure_grid():
     if n_rows == 1:
         axes = axes.reshape(1, -1)
 
-    col_titles = ["Original", "Ground Truth", "Adaptive", "Tversky (best seed)",
-                   "Error (Adaptive)", "Error (Tversky)"]
+    col_titles = ["Original", "Ground Truth", "Sauvola", "Tversky (best seed)",
+                   "Error (Sauvola)", "Error (Tversky)"]
     for j, title in enumerate(col_titles):
         axes[0, j].set_title(title, fontsize=10, fontweight='bold')
 
@@ -198,9 +206,9 @@ def generate_failure_grid():
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-        # Adaptive prediction (at original resolution, with cleanup to match baseline)
-        adaptive_pred = adaptive_threshold(gray)
-        adaptive_pred = morphological_cleanup(adaptive_pred)
+        # Sauvola prediction (at original resolution, with cleanup to match baseline)
+        sauvola_pred = sauvola_threshold_img(gray)
+        sauvola_pred = morphological_cleanup(sauvola_pred)
 
         # Deep model prediction (use model's training resolution)
         deep_pred = predict_mask(model, img_path, (img_h, img_w), device)
@@ -208,19 +216,19 @@ def generate_failure_grid():
         h, w = gt.shape[:2]
         img_display = cv2.resize(img_rgb, (w, h))
 
-        if adaptive_pred.shape[:2] != (h, w):
-            adaptive_pred = cv2.resize(adaptive_pred, (w, h), interpolation=cv2.INTER_NEAREST)
+        if sauvola_pred.shape[:2] != (h, w):
+            sauvola_pred = cv2.resize(sauvola_pred, (w, h), interpolation=cv2.INTER_NEAREST)
         if deep_pred.shape[:2] != (h, w):
             deep_pred = cv2.resize(deep_pred, (w, h), interpolation=cv2.INTER_NEAREST)
 
         # Metrics
-        adapt_metrics = calculate_metrics(adaptive_pred, gt)
+        sauv_metrics = calculate_metrics(sauvola_pred, gt)
         deep_metrics = calculate_metrics(deep_pred, gt)
-        print(f"  {img_id}: adaptive F1={adapt_metrics['f1']:.4f}, "
+        print(f"  {img_id}: sauvola F1={sauv_metrics['f1']:.4f}, "
               f"deep F1={deep_metrics['f1']:.4f}")
 
         # Error overlays
-        adapt_error = create_error_overlay(img_display, adaptive_pred, gt)
+        sauv_error = create_error_overlay(img_display, sauvola_pred, gt)
         deep_error = create_error_overlay(img_display, deep_pred, gt)
 
         # Plot
@@ -229,9 +237,9 @@ def generate_failure_grid():
 
         axes[i, 1].imshow(gt, cmap='gray')
 
-        axes[i, 2].imshow(adaptive_pred, cmap='gray')
+        axes[i, 2].imshow(sauvola_pred, cmap='gray')
         axes[i, 2].text(
-            0.5, -0.06, f"F1 = {adapt_metrics['f1']:.3f}",
+            0.5, -0.06, f"F1 = {sauv_metrics['f1']:.3f}",
             transform=axes[i, 2].transAxes, fontsize=9, color='red',
             ha='center', va='top', fontweight='bold',
         )
@@ -243,7 +251,7 @@ def generate_failure_grid():
             ha='center', va='top', fontweight='bold',
         )
 
-        axes[i, 4].imshow(adapt_error)
+        axes[i, 4].imshow(sauv_error)
         axes[i, 5].imshow(deep_error)
 
         for ax in axes[i]:
@@ -272,9 +280,10 @@ def generate_scatter_plot():
     with open(baseline_path) as f:
         bl = json.load(f)
 
-    # Baseline per-image F1
+    # Baseline per-image F1 (use Sauvola as strongest classical baseline)
     bl_per = {}
-    for entry in bl["adaptive"]["per_image"]:
+    bl_method = "sauvola" if "sauvola" in bl else "adaptive"
+    for entry in bl[bl_method]["per_image"]:
         name = entry["image"].replace(".png", "")
         bl_per[name] = entry["metrics"]["f1"]
 
@@ -325,13 +334,13 @@ def generate_scatter_plot():
 
     # Shade regions
     ax.fill_between(lims, lims, lims[1], alpha=0.05, color='blue', label='Deep wins')
-    ax.fill_between(lims, lims[0], lims, alpha=0.05, color='red', label='Adaptive wins')
+    ax.fill_between(lims, lims[0], lims, alpha=0.05, color='red', label='Sauvola wins')
 
     ax.set_xlim(lims)
     ax.set_ylim(lims)
-    ax.set_xlabel('Adaptive Thresholding F1', fontsize=11)
+    ax.set_xlabel('Sauvola F1', fontsize=11)
     ax.set_ylabel('Tversky F1 (seed-averaged)', fontsize=11)
-    ax.set_title('Per-Image: Adaptive vs Tversky', fontsize=12, fontweight='bold')
+    ax.set_title('Per-Image: Sauvola vs Tversky', fontsize=12, fontweight='bold')
     ax.legend(fontsize=8, loc='lower right')
     ax.set_aspect('equal')
     ax.grid(True, alpha=0.3)
