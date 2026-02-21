@@ -367,7 +367,7 @@ def plot_training_curves(experiments_dir, output_dir):
                 "seed": cfg.get("seed"),
             }
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5.5))
 
     for loss_label in LOSS_ORDER:
         if loss_label not in best_runs:
@@ -382,19 +382,20 @@ def plot_training_curves(experiments_dir, output_dir):
         epochs = list(range(1, len(train_loss) + 1))
 
         if train_loss:
-            ax1.plot(epochs, train_loss, color=color, alpha=0.4, linewidth=0.8)
+            ax1.plot(epochs, train_loss, color=color, alpha=0.35, linewidth=1.0,
+                     linestyle=":")
         if val_loss:
-            ax1.plot(epochs, val_loss, color=color, linewidth=1.5,
+            ax1.plot(epochs, val_loss, color=color, linewidth=2.0,
                      label=f"{loss_label} (seed {seed})")
         if val_f1:
             ax2.plot(list(range(1, len(val_f1) + 1)), val_f1,
-                     color=color, linewidth=1.5,
+                     color=color, linewidth=2.0,
                      label=f"{loss_label} (seed {seed})")
 
     ax1.set_xlabel("Epoch")
     ax1.set_ylabel("Loss")
     ax1.set_title("Training & Validation Loss")
-    ax1.legend(fontsize=8)
+    ax1.legend(fontsize=10, framealpha=0.9)
     ax1.grid(alpha=0.3, linestyle="--")
     ax1.spines["top"].set_visible(False)
     ax1.spines["right"].set_visible(False)
@@ -402,7 +403,7 @@ def plot_training_curves(experiments_dir, output_dir):
     ax2.set_xlabel("Epoch")
     ax2.set_ylabel("F1 Score")
     ax2.set_title("Validation F1 Over Training")
-    ax2.legend(fontsize=8)
+    ax2.legend(fontsize=10, framealpha=0.9)
     ax2.grid(alpha=0.3, linestyle="--")
     ax2.set_ylim(0, 0.85)
     ax2.spines["top"].set_visible(False)
