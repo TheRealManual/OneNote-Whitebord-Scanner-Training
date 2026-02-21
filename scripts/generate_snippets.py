@@ -132,16 +132,17 @@ with open(SNIPPETS / "resolution_study_f1.tex", "w") as f:
             " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
             " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
             " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
+            " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
             "}\n")
     f.write("\\toprule\n")
     f.write("Resolution & \\multicolumn{2}{c}{F1} & \\multicolumn{2}{c}{IoU}"
-            " & \\multicolumn{2}{c}{BF1} \\\\\n")
+            " & \\multicolumn{2}{c}{BF1} & \\multicolumn{2}{c}{B-IoU} \\\\\n")
     f.write("\\midrule\n")
     for res in ["1024x768", "1536x1152"]:
         dd = res_agg[res]
         label = res.replace("x", "$\\times$")
         row = [label]
-        for m in ["f1", "iou", "boundary_f1"]:
+        for m in metrics_list:  # f1, iou, boundary_f1, boundary_iou
             vals = dd[f"overall_{m}"]
             row.append(f"{np.mean(vals):.3f}")
             row.append(f"{np.std(vals):.3f}")
@@ -158,18 +159,22 @@ with open(SNIPPETS / "classical_baseline.tex", "w") as f:
             " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
             " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
             " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
+            " S[table-format=1.3] @{${\\pm}$} S[table-format=1.3]"
             "}\n")
     f.write("\\toprule\n")
     f.write("Method & \\multicolumn{2}{c}{F1} & \\multicolumn{2}{c}{IoU}"
-            " & \\multicolumn{2}{c}{BF1} \\\\\n")
+            " & \\multicolumn{2}{c}{BF1} & \\multicolumn{2}{c}{B-IoU} \\\\\n")
     f.write("\\midrule\n")
     for method in ["adaptive", "otsu"]:
         r = baseline[method]["results"]
         label = method.capitalize()
         row = [label]
-        for m in ["f1", "iou", "boundary_f1"]:
-            row.append(f"{r[m]['mean']:.3f}")
-            row.append(f"{r[m]['std']:.3f}")
+        for m in metrics_list:  # f1, iou, boundary_f1, boundary_iou
+            if m in r:
+                row.append(f"{r[m]['mean']:.3f}")
+                row.append(f"{r[m]['std']:.3f}")
+            else:
+                row.extend(["--", "--"])
         f.write(" & ".join(row) + " \\\\\n")
     f.write("\\bottomrule\n")
     f.write("\\end{tabular}\n")
@@ -229,9 +234,9 @@ for name, r in models.items():
         img = item["image"]
         loss_per_image_f1[loss][img].append(item["metrics"]["f1"])
 
-# Baseline per-image
+# Baseline per-image (normalise keys: strip .png to match deep model keys)
 baseline_pi = baseline["adaptive"]["per_image"]
-bl_f1 = {item["image"]: item["metrics"]["f1"] for item in baseline_pi}
+bl_f1 = {item["image"].replace(".png", ""): item["metrics"]["f1"] for item in baseline_pi}
 
 with open(SNIPPETS / "robustness.tex", "w") as f:
     f.write("\\begin{tabular}{l"
@@ -260,16 +265,24 @@ with open(SNIPPETS / "robustness.tex", "w") as f:
                 f" & {img_f1s.min():.3f}"
                 f" & {img_f1s.max():.3f}"
                 f" & {wins}/12 \\\\\n")
-    # Baseline
+    # Baseline — count images where adaptive beats the best deep model (Tversky)
     bl_arr = np.array(list(bl_f1.values()))
     q25, q75 = np.percentile(bl_arr, 25), np.percentile(bl_arr, 75)
+    # Find best deep model per image (across all losses)
+    best_deep = {}
+    for loss in LOSS_ORDER:
+        dd = loss_per_image_f1[loss]
+        for img in dd:
+            avg = np.mean(dd[img])
+            best_deep[img] = max(best_deep.get(img, -1), avg)
+    bl_wins = sum(1 for img in bl_f1 if bl_f1[img] > best_deep.get(img, 999))
     f.write("\\midrule\n")
     f.write(f"Adaptive & {bl_arr.mean():.3f}"
             f" & {np.median(bl_arr):.3f}"
             f" & {q75-q25:.3f}"
             f" & {bl_arr.min():.3f}"
             f" & {bl_arr.max():.3f}"
-            f" & 12/12 \\\\\n")
+            f" & {bl_wins}/12 \\\\\n")
     f.write("\\bottomrule\n")
     f.write("\\end{tabular}\n")
 
@@ -290,9 +303,13 @@ with open(SNIPPETS / "statistical_significance.tex", "w") as f:
     f.write("\\midrule\n")
 
     key_pairs = [
+        ("ce", "focal", "CE vs.~Focal"),
         ("ce", "dice", "CE vs.~Dice"),
+        ("ce", "dice_focal", "CE vs.~Dice+Focal"),
         ("ce", "tversky", "CE vs.~Tversky"),
+        ("focal", "dice", "Focal vs.~Dice"),
         ("focal", "dice_focal", "Focal vs.~Dice+Focal"),
+        ("focal", "tversky", "Focal vs.~Tversky"),
         ("dice", "dice_focal", "Dice vs.~Dice+Focal"),
         ("dice", "tversky", "Dice vs.~Tversky"),
         ("dice_focal", "tversky", "Dice+Focal vs.~Tversky"),
@@ -300,10 +317,12 @@ with open(SNIPPETS / "statistical_significance.tex", "w") as f:
     f1_tests = stats["f1"]
     for a, b, label in key_pairs:
         key = f"{a}_vs_{b}"
+        sign = 1.0
         if key not in f1_tests:
             key = f"{b}_vs_{a}"
+            sign = -1.0  # flip sign when key order is reversed
         t = f1_tests[key]
-        mean_delta = t["mean_diff"]
+        mean_delta = sign * t["mean_diff"]
         wp = t["wilcoxon_pvalue"]
         # Compute median paired diff from per-image data (same sign as mean_diff: a - b)
         diffs = []
