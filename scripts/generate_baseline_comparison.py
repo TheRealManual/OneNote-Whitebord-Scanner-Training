@@ -55,6 +55,12 @@ def adaptive_threshold(image_gray, block_size=51, C=15):
     return mask
 
 
+def morphological_cleanup(mask, kernel_size=2):
+    """Morphological opening to remove small noise (must match classical_baseline.py)."""
+    kernel = np.ones((kernel_size, kernel_size), np.uint8)
+    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+
 def load_model(model_path, device="cpu"):
     import torch
     from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
@@ -67,19 +73,22 @@ def load_model(model_path, device="cpu"):
 
 
 def predict_mask(model, img_path, img_size=(768, 1024), device="cpu"):
+    """Run inference matching evaluate_all_models.run_inference exactly."""
     import torch
     import torch.nn.functional as F
     from torchvision import transforms
 
+    img = Image.open(img_path).convert("RGB")
+    original_size = img.size  # (W, H)
+
+    # Resize via PIL first, then transform — matches evaluate_all_models.py
+    img_resized = img.resize((img_size[1], img_size[0]))  # PIL: (W, H)
+
     transform = transforms.Compose([
-        transforms.Resize(img_size),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-
-    img = Image.open(img_path).convert("RGB")
-    original_size = img.size  # (W, H)
-    img_tensor = transform(img).unsqueeze(0).to(device)
+    img_tensor = transform(img_resized).unsqueeze(0).to(device)
 
     with torch.no_grad():
         output = model(img_tensor)
@@ -116,13 +125,15 @@ def create_error_overlay(original, pred_mask, gt_mask):
 
 
 def find_best_deep_model():
-    """Find the best-seed model for Tversky (highest overall F1)."""
+    """Find the best-seed model for Tversky (highest overall F1).
+    Returns (model_dir_name, img_height, img_width)."""
     test_eval_path = RESULTS_DIR / "test_set_evaluation.json"
     with open(test_eval_path) as f:
         data = json.load(f)
 
     best_f1 = -1
     best_dir = None
+    best_cfg = None
     for name, mdata in data["models"].items():
         if "error" in mdata:
             continue
@@ -135,7 +146,10 @@ def find_best_deep_model():
         if f1 > best_f1:
             best_f1 = f1
             best_dir = name
-    return best_dir
+            best_cfg = cfg
+    img_h = best_cfg.get("img_height", 768) if best_cfg else 768
+    img_w = best_cfg.get("img_width", 1024) if best_cfg else 1024
+    return best_dir, img_h, img_w
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +162,8 @@ def generate_failure_grid():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    best_dir = find_best_deep_model()
-    print(f"Best Tversky model: {best_dir}")
+    best_dir, img_h, img_w = find_best_deep_model()
+    print(f"Best Tversky model: {best_dir}  (inference resolution {img_h}x{img_w})")
     model_path = EXPERIMENTS_DIR / best_dir / "whiteboard_seg_best.pt"
     model = load_model(str(model_path), device)
 
@@ -184,11 +198,12 @@ def generate_failure_grid():
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-        # Adaptive prediction (at original resolution)
+        # Adaptive prediction (at original resolution, with cleanup to match baseline)
         adaptive_pred = adaptive_threshold(gray)
+        adaptive_pred = morphological_cleanup(adaptive_pred)
 
-        # Deep model prediction
-        deep_pred = predict_mask(model, img_path, (768, 1024), device)
+        # Deep model prediction (use model's training resolution)
+        deep_pred = predict_mask(model, img_path, (img_h, img_w), device)
 
         h, w = gt.shape[:2]
         img_display = cv2.resize(img_rgb, (w, h))
@@ -201,6 +216,8 @@ def generate_failure_grid():
         # Metrics
         adapt_metrics = calculate_metrics(adaptive_pred, gt)
         deep_metrics = calculate_metrics(deep_pred, gt)
+        print(f"  {img_id}: adaptive F1={adapt_metrics['f1']:.4f}, "
+              f"deep F1={deep_metrics['f1']:.4f}")
 
         # Error overlays
         adapt_error = create_error_overlay(img_display, adaptive_pred, gt)
