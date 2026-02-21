@@ -230,10 +230,18 @@ def generate_failure_grid():
         axes[i, 1].imshow(gt, cmap='gray')
 
         axes[i, 2].imshow(adaptive_pred, cmap='gray')
-        axes[i, 2].set_xlabel(f"F1={adapt_metrics['f1']:.3f}", fontsize=9, color='red')
+        axes[i, 2].text(
+            0.5, -0.06, f"F1 = {adapt_metrics['f1']:.3f}",
+            transform=axes[i, 2].transAxes, fontsize=9, color='red',
+            ha='center', va='top', fontweight='bold',
+        )
 
         axes[i, 3].imshow(deep_pred, cmap='gray')
-        axes[i, 3].set_xlabel(f"F1={deep_metrics['f1']:.3f}", fontsize=9, color='blue')
+        axes[i, 3].text(
+            0.5, -0.06, f"F1 = {deep_metrics['f1']:.3f}",
+            transform=axes[i, 3].transAxes, fontsize=9, color='blue',
+            ha='center', va='top', fontweight='bold',
+        )
 
         axes[i, 4].imshow(adapt_error)
         axes[i, 5].imshow(deep_error)
